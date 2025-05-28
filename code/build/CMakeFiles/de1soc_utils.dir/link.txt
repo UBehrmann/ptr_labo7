@@ -1,2 +1,0 @@
-/opt/toolchains/de1soc-sdk/bin/arm-linux-gnueabihf-ar qc libde1soc_utils.a CMakeFiles/de1soc_utils.dir/de1soc_utils/de1soc_io.c.o CMakeFiles/de1soc_utils.dir/de1soc_utils/de1soc_video.c.o CMakeFiles/de1soc_utils.dir/de1soc_utils/de1soc_audio.c.o CMakeFiles/de1soc_utils.dir/de1soc_utils/convolution.c.o CMakeFiles/de1soc_utils.dir/de1soc_utils/fft_utils.c.o CMakeFiles/de1soc_utils.dir/de1soc_utils/grayscale.c.o CMakeFiles/de1soc_utils.dir/de1soc_utils/rtq.c.o
-/opt/toolchains/de1soc-sdk/bin/arm-linux-gnueabihf-ranlib libde1soc_utils.a

@@ -1,0 +1,124 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{graphicx}
+\graphicspath{ {./imgs/} }
+\usepackage{fancyhdr} % For headers and footers
+\usepackage{geometry}
+\usepackage{hyperref} % For clickable links
+\usepackage{longtable} % For long tables that can span multiple pages
+\usepackage{array}     % For better column formatting
+
+% Adjust margins
+\geometry{
+    top=4cm, 
+    bottom=2.5cm, 
+    left=2.5cm, 
+    right=2.5cm,
+    headheight=3cm, % Ensures sufficient space for header content
+    headsep=0.5cm,
+    }
+
+% Define the custom headers
+\fancypagestyle{firstpage}{% First page header style
+    \fancyhf{} % Clear all header/footer fields
+    \fancyhead[L]{%
+        \includegraphics[height=1.5cm]{heig_logo.png} \\
+    }
+    \fancyhead[R]{%
+        \includegraphics[height=1.5cm]{reds_logo.png} \\
+    }
+    \fancyfoot{} % No footer on the first page
+}
+
+% Define other pages style
+\fancypagestyle{otherpages}{%
+    \fancyhf{}
+    \fancyhead[L]{%
+        \includegraphics[height=1.5cm]{heig_logo.png} \\
+    }
+    \fancyhead[R]{%
+        \small Laboratoire 7: Gestion de surcharge \\
+        Rodrigo Lopez Dos Santos \\
+        Urs Behrmann \\
+    }
+    \fancyfoot[C]{\small page \thepage}
+}
+
+\author{Urs Behrmann}
+
+\setlength{\parskip}{1em} % Définit un espace entre chaque paragraphe
+\setlength{\parindent}{0pt} % Optionnel : enlève l'indentation des paragraphes
+
+\begin{document}
+
+\emergencystretch=1em % Ajoute une flexibilité d'espacement
+
+% First page content
+\thispagestyle{firstpage}
+
+
+\vspace*{2cm}
+\begin{center}
+    \Huge Laboratoire 7 \\
+    \vspace{0.2cm}
+    \Large Gestion de surcharge\\
+    \vspace{1cm}
+    \small Départements : TIC\\
+    Unité d'enseignement PTR\\
+\end{center}
+
+\vspace{9cm}
+
+\renewcommand{\arraystretch}{1.5} % Adjust row height
+
+\begin{flushleft} % Left-align the table
+    \begin{tabular}{@{}l l@{}}
+        \textbf{Auteurs :}       & \textbf{Rodrigo Lopez Dos Santos} \\
+                                 & \textbf{Urs Behrmann} \\
+        \textbf{Professeur :}    & \textbf{Yorick Brunet} \\
+        \textbf{Assistant :}     & \textbf{Anthony I. Jaccard} \\
+        \textbf{Classe :}        & \textbf{PTR} \\
+        \textbf{Salle de labo :} & \textbf{A09} \\
+        \textbf{Date :}          & \textbf{28.05.2025} 
+    \end{tabular}
+\end{flushleft}
+
+\newpage
+
+% Apply the other pages style
+\pagestyle{otherpages}
+
+\tableofcontents
+
+\newpage
+
+\section{Introduction}
+
+
+
+\newpage
+
+\section{Etape 1 : Observation de la surcharge}
+
+
+
+\newpage
+
+\section{Etape 2 : Détection de la surcharge avec watchdog}
+
+
+
+\newpage
+
+\section{Etape 3 : Fonctionnalité dégradée}
+
+
+
+\newpage
+
+\section{Conclusion}
+
+
+
+
+\end{document}
