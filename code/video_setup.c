@@ -52,37 +52,46 @@ void *video_task(void *cookie)
     pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
     if(evl_attach_self("EVL video thread") < 0) return NULL;
 
-    // Loop that reads a file with raw data
-    while (*priv->running)
-    {
-        FILE *file = fopen(VIDEO_FILENAME, "rb");
-        if (!file)
-        {
-            printf("Error: Couldn't open raw video file.\n");
-            return NULL;
+    FILE *file = fopen(VIDEO_FILENAME, "rb");
+
+    if (!file) {
+        printf("Error: Couldn't open raw video file.\n");
+    } else {
+        // Loop that reads a file with raw data
+        while (*priv->running){
+
+            // Read each frame from the file
+            for (int i = 0; i < NB_FRAMES; i++) {
+
+                if (!*priv->running)
+                    break;
+
+                /* CONVOLUTION DISPLAY */
+                fread(src_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL, 1, file);
+                rgba_to_grayscale8(&src_image, gs_src);
+                convolution_grayscale(gs_src, gs_dst, WIDTH, HEIGHT);
+                grayscale_to_rgba(gs_dst, &dst_image);
+                memcpy(get_video_buffer(), dst_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
+
+                oob_read(tmfd, &ticks, sizeof(ticks));
+
+                // Ajout : détection d'overrun
+                int overruns = evl_get_timer_overruns(tmfd);
+                if (overruns > 0) {
+                    printf("[VIDEO_TASK] Timer overrun detected! Overruns: %d\n", overruns);
+                }
+            }
         }
 
-        // Read each frame from the file
-        for (int i = 0; i < NB_FRAMES; i++)
-        {
-
-            if (!*priv->running)
-                break;
-
-            /* CONVOLUTION DISPLAY */
-            fread(src_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL, 1, file);
-            rgba_to_grayscale8(&src_image, gs_src);
-            convolution_grayscale(gs_src, gs_dst, WIDTH, HEIGHT);
-            grayscale_to_rgba(gs_dst, &dst_image);
-            memcpy(get_video_buffer(), dst_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
-
-            oob_read(tmfd, &ticks, sizeof(ticks));            
-        }
+        fclose(file);
     }
+
     free(src_image.data);
     free(dst_image.data);
+    
     free(gs_src);
     free(gs_dst);
+
     evl_printf("Terminating video task.\n");
 
     return NULL;
