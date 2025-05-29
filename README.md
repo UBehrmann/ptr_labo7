@@ -51,7 +51,7 @@ make
 
 ```bash
 # Deploie le programme sur la carte
-/media/sf_Partague_VM_Reds_2025/PTR/ptr_lab06/de1soc.sh deploy main
+/media/sf_Partague_VM_Reds_2025/PTR/ptr_labo7/de1soc.sh deploy main
 
 # Deploie puis lance le programme sur la carte
 ../de1soc.sh run main

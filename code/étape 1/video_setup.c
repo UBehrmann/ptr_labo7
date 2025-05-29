@@ -76,9 +76,8 @@ void *video_task(void *cookie)
                 oob_read(tmfd, &ticks, sizeof(ticks));
 
                 // Ajout : détection d'overrun
-                int overruns = evl_get_timer_overruns(tmfd);
-                if (overruns > 0) {
-                    printf("[VIDEO_TASK] Timer overrun detected! Overruns: %d\n", overruns);
+                if (ticks > 1) {
+                    printf("[VIDEO_TASK] Timer overrun detected! Overruns: %llu\n", ticks-1);
                 }
             }
         }
