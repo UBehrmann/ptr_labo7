@@ -12,6 +12,6 @@ add_library(de1soc_utils STATIC de1soc_utils/de1soc_io.c
 	de1soc_utils/grayscale.c
 	de1soc_utils/rtq.c)
 
-add_executable(main main.c video_setup.c load_setup.c)
+add_executable(main main.c video_setup.c load_setup.c canary.c watchdog.c)
 
 target_link_libraries(main pthread evl de1soc_utils m)

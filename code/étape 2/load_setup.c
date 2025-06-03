@@ -1,14 +1,13 @@
-#include "load_setup.h"
 
 #include <unistd.h>
-
 #include <evl/evl.h>
 #include <evl/clock.h>
 #include <evl/timer.h>
 
+#include "load_setup.h"
 #include "de1soc_utils/de1soc_io.h"
+#include "commun.h"
 
-#define NS_IN_MS 1000000
 
 void ts_diff(struct timespec *start, struct timespec *end, struct timespec *diff)
 {
@@ -32,7 +31,7 @@ void *load_task(void* cookie)
 	//Make timer start 1 sec from now (for some headroom)
     value.it_value.tv_sec += 1;
 	value.it_interval.tv_sec = 0;
-	value.it_interval.tv_nsec = LOAD_PERIOD_MS * NS_IN_MS;
+	value.it_interval.tv_nsec = LOAD_PERIOD_NS;
 
 	evl_set_timer(tmfd, &value, NULL);
 
@@ -57,7 +56,7 @@ void *load_task(void* cookie)
 		{
 			evl_read_clock(EVL_CLOCK_MONOTONIC, &ts_now);
 			ts_diff(&ts_from, &ts_now, &ts_int);
-		} while (ts_int.tv_sec == 0 && ts_int.tv_nsec < (time_t)(sw_val * NS_IN_MS));
+		} while (ts_int.tv_sec == 0 && ts_int.tv_nsec < (time_t)(sw_val * ONE_MS_IN_NS));
 		
 
 		oob_read(tmfd, &ticks, sizeof(ticks));

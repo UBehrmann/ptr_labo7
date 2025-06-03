@@ -2,9 +2,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
-
 #include <unistd.h>
-
 #include <evl/evl.h>
 #include <evl/timer.h>
 
@@ -13,9 +11,8 @@
 #include "de1soc_utils/image.h"
 #include "de1soc_utils/grayscale.h"
 #include "de1soc_utils/convolution.h"
+#include "commun.h"
 
-#define S_IN_NS 1000000000UL
-#define VIDEO_PRIO          50
 
 void *video_task(void *cookie)
 {
@@ -24,8 +21,6 @@ void *video_task(void *cookie)
     struct img_1D_t dst_image;
     uint64_t ticks;
     struct sched_param param;
-
-    uint64_t period_in_ns = S_IN_NS / FRAMERATE;
 
     uint8_t *gs_src = (uint8_t *)malloc(WIDTH * HEIGHT * sizeof(uint8_t));
     uint8_t *gs_dst = (uint8_t *)malloc(WIDTH * HEIGHT * sizeof(uint8_t));
@@ -43,7 +38,7 @@ void *video_task(void *cookie)
 	//Make timer start 1 sec from now (for some headroom)
     value.it_value.tv_sec += 1;
 	value.it_interval.tv_sec = 0;
-	value.it_interval.tv_nsec = period_in_ns;
+	value.it_interval.tv_nsec = VIDEO_PERIOD_NS;
 
 	evl_set_timer(tmfd, &value, NULL);
 
