@@ -60,6 +60,9 @@ void *video_task(void *cookie)
         // Loop that reads a file with raw data
         while (*priv->running){
 
+            // Reset file position to 0 at the end of each loop
+            fseek(file, 0, SEEK_SET);
+
             // Read each frame from the file
             for (int i = 0; i < NB_FRAMES; i++) {
 
@@ -80,8 +83,6 @@ void *video_task(void *cookie)
                     printf("[VIDEO_TASK] Timer overrun detected! Overruns: %llu\n", ticks-1);
                 }
             }
-            // Reset file position to 0 at the end of each loop
-            fseek(file, 0, SEEK_SET);
         }
 
         fclose(file);
