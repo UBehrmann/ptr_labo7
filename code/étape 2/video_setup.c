@@ -75,6 +75,8 @@ void *video_task(void *cookie)
                     printf("[VIDEO_TASK] Timer overrun detected! Overruns: %llu\n", ticks-1);
                 }
             }
+            // Reset file position to 0 at the end of each loop
+            fseek(file, 0, SEEK_SET);
         }
 
         fclose(file);
