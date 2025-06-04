@@ -13,9 +13,7 @@
 #include "de1soc_utils/convolution.h"
 #include "commun.h"
 
-
-void *video_task(void *cookie)
-{
+void *video_task(void *cookie) {
     Priv_video_args_t *priv = (Priv_video_args_t *)cookie;
     struct img_1D_t src_image;
     struct img_1D_t dst_image;
@@ -33,19 +31,19 @@ void *video_task(void *cookie)
 
     /* Create timer */
     struct itimerspec value;
-	int tmfd = evl_new_timer(EVL_CLOCK_MONOTONIC);
-	evl_read_clock(EVL_CLOCK_MONOTONIC, &value.it_value);
-	//Make timer start 1 sec from now (for some headroom)
+    int tmfd = evl_new_timer(EVL_CLOCK_MONOTONIC);
+    evl_read_clock(EVL_CLOCK_MONOTONIC, &value.it_value);
+    // Make timer start 1 sec from now (for some headroom)
     value.it_value.tv_sec += 1;
-	value.it_interval.tv_sec = 0;
-	value.it_interval.tv_nsec = VIDEO_PERIOD_NS;
+    value.it_interval.tv_sec = 0;
+    value.it_interval.tv_nsec = VIDEO_PERIOD_NS;
 
-	evl_set_timer(tmfd, &value, NULL);
+    evl_set_timer(tmfd, &value, NULL);
 
     // Make thread RT
     param.sched_priority = VIDEO_PRIO;
     pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
-    if(evl_attach_self("EVL video thread") < 0) return NULL;
+    if (evl_attach_self("EVL video thread") < 0) return NULL;
 
     FILE *file = fopen(VIDEO_FILENAME, "rb");
 
@@ -53,25 +51,23 @@ void *video_task(void *cookie)
         printf("Error: Couldn't open raw video file.\n");
     } else {
         // Loop that reads a file with raw data
-        while (*priv->running){
-
+        while (*priv->running) {
             // Reset file position to 0 at the end of each loop
             fseek(file, 0, SEEK_SET);
 
             // Read each frame from the file
             for (int i = 0; i < NB_FRAMES; i++) {
-
-                if (!*priv->running)
-                    break;
+                if (!*priv->running) break;
 
                 /* CONVOLUTION DISPLAY */
                 fread(src_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL, 1, file);
-                
+
                 video_mode_t mode = atomic_load(priv->video_mode);
+                video_mode_t old_mode = mode;
                 uint32_t keys = read_key() & 0x3;
                 bool display = false;
 
-                switch(keys){
+                switch (keys) {
                     case 3:
                         //--Méthode 1 : Diminuer les opérations
                         switch (mode) {
@@ -93,27 +89,37 @@ void *video_task(void *cookie)
                                 break;
                         }
                         break;
-                    case 2:
+                    case 0:
                         //--Méthode 2 : Diminuer le framerate
+                        if(old_mode != mode) {
+                            old_mode = mode;
                         switch (mode) {
                             case VIDEO_MODE_DEGRADED_2:
-                                value.it_value.tv_sec = 0;
+                            evl_read_clock(EVL_CLOCK_MONOTONIC, &value.it_value);
+                                // value.it_value.tv_sec += 1;
+                                value.it_value.tv_nsec += VIDEO_PERIOD_NS / 15;
                                 value.it_interval.tv_sec = 0;
-                                value.it_interval.tv_nsec = VIDEO_PERIOD_NS / 3;
+                                value.it_interval.tv_nsec = VIDEO_PERIOD_NS / 15;
                                 evl_set_timer(tmfd, &value, NULL);
                                 break;
                             case VIDEO_MODE_DEGRADED_1:
-                                value.it_value.tv_sec = 0;
+                            evl_read_clock(EVL_CLOCK_MONOTONIC, &value.it_value);
+                                // value.it_value.tv_sec += 1;
+                                value.it_value.tv_nsec += VIDEO_PERIOD_NS / 5;
                                 value.it_interval.tv_sec = 0;
-                                value.it_interval.tv_nsec = VIDEO_PERIOD_NS / 2;
+                                value.it_interval.tv_nsec = VIDEO_PERIOD_NS / 5;
                                 evl_set_timer(tmfd, &value, NULL);
                                 break;
                             case VIDEO_MODE_NORMAL:
-                                value.it_value.tv_sec = 0;
+                            evl_read_clock(EVL_CLOCK_MONOTONIC, &value.it_value);
+                                // value.it_value.tv_sec += 1;
+                                value.it_value.tv_nsec += VIDEO_PERIOD_NS;
                                 value.it_interval.tv_sec = 0;
                                 value.it_interval.tv_nsec = VIDEO_PERIOD_NS;
                                 evl_set_timer(tmfd, &value, NULL);
+                            }
                         }
+
                         rgba_to_grayscale8(&src_image, gs_src);
                         convolution_grayscale(gs_src, gs_dst, WIDTH, HEIGHT);
                         grayscale_to_rgba(gs_dst, &dst_image);
@@ -145,14 +151,14 @@ void *video_task(void *cookie)
                         convolution_grayscale(gs_src, gs_dst, WIDTH, HEIGHT);
                         grayscale_to_rgba(gs_dst, &dst_image);
                         memcpy(get_video_buffer(), dst_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
-                        break;                   
+                        break;
                 }
 
                 oob_read(tmfd, &ticks, sizeof(ticks));
 
                 // Ajout : détection d'overrun
                 if (ticks > 1) {
-                    printf("[VIDEO_TASK] Timer overrun detected! Overruns: %llu\n", ticks-1);
+                    evl_printf("[VIDEO_TASK] Timer overrun detected! Overruns: %llu\n", ticks - 1);
                 }
             }
         }
@@ -162,7 +168,7 @@ void *video_task(void *cookie)
 
     free(src_image.data);
     free(dst_image.data);
-    
+
     free(gs_src);
     free(gs_dst);
 
