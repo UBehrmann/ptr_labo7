@@ -63,26 +63,88 @@ void *video_task(void *cookie)
 
                 /* CONVOLUTION DISPLAY */
                 fread(src_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL, 1, file);
-
+                
                 video_mode_t mode = atomic_load(priv->video_mode);
-                switch (mode) {
-                    case VIDEO_MODE_DEGRADED_2:
-                        // fall through
-                        memcpy(get_video_buffer(), src_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
+                uint32_t keys = read_key() & 0x3;
+                bool display = false;
+
+                switch(keys){
+                    case 3:
+                        //--Méthode 1 : Diminuer les opérations
+                        switch (mode) {
+                            case VIDEO_MODE_DEGRADED_2:
+                                // fall through
+                                memcpy(get_video_buffer(), src_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
+                                break;
+                            case VIDEO_MODE_DEGRADED_1:
+                                // Skip convolution
+                                rgba_to_grayscale32(&src_image, &dst_image);
+                                memcpy(get_video_buffer(), dst_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
+                                break;
+                            case VIDEO_MODE_NORMAL:
+                                // Full processing
+                                rgba_to_grayscale8(&src_image, gs_src);
+                                convolution_grayscale(gs_src, gs_dst, WIDTH, HEIGHT);
+                                grayscale_to_rgba(gs_dst, &dst_image);
+                                memcpy(get_video_buffer(), dst_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
+                                break;
+                        }
                         break;
-                    case VIDEO_MODE_DEGRADED_1:
-                        // Skip convolution
-                        rgba_to_grayscale32(&src_image, &dst_image);
-                        memcpy(get_video_buffer(), dst_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
-                        break;
-                    case VIDEO_MODE_NORMAL:
-                        // Full processing
+                    case 2:
+                        //--Méthode 2 : Diminuer le framerate
+                        switch (mode) {
+                            case VIDEO_MODE_DEGRADED_2:
+                                value.it_value.tv_sec = 0;
+                                value.it_interval.tv_sec = 0;
+                                value.it_interval.tv_nsec = VIDEO_PERIOD_NS / 3;
+                                evl_set_timer(tmfd, &value, NULL);
+                                break;
+                            case VIDEO_MODE_DEGRADED_1:
+                                value.it_value.tv_sec = 0;
+                                value.it_interval.tv_sec = 0;
+                                value.it_interval.tv_nsec = VIDEO_PERIOD_NS / 2;
+                                evl_set_timer(tmfd, &value, NULL);
+                                break;
+                            case VIDEO_MODE_NORMAL:
+                                value.it_value.tv_sec = 0;
+                                value.it_interval.tv_sec = 0;
+                                value.it_interval.tv_nsec = VIDEO_PERIOD_NS;
+                                evl_set_timer(tmfd, &value, NULL);
+                        }
                         rgba_to_grayscale8(&src_image, gs_src);
                         convolution_grayscale(gs_src, gs_dst, WIDTH, HEIGHT);
                         grayscale_to_rgba(gs_dst, &dst_image);
                         memcpy(get_video_buffer(), dst_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
                         break;
+                    case 1:
+                        //--Méthode 3 : Augmenter la priorité
+                        switch (mode) {
+                            case VIDEO_MODE_DEGRADED_2:
+                                param.sched_priority = VIDEO_PRIO + 30;
+                                pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
+                                break;
+                            case VIDEO_MODE_DEGRADED_1:
+                                param.sched_priority = VIDEO_PRIO + 15;
+                                pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
+                                break;
+                            case VIDEO_MODE_NORMAL:
+                                param.sched_priority = VIDEO_PRIO;
+                                pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
+                                break;
+                        }
+                        rgba_to_grayscale8(&src_image, gs_src);
+                        convolution_grayscale(gs_src, gs_dst, WIDTH, HEIGHT);
+                        grayscale_to_rgba(gs_dst, &dst_image);
+                        memcpy(get_video_buffer(), dst_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
+                        break;
+                    default:
+                        rgba_to_grayscale8(&src_image, gs_src);
+                        convolution_grayscale(gs_src, gs_dst, WIDTH, HEIGHT);
+                        grayscale_to_rgba(gs_dst, &dst_image);
+                        memcpy(get_video_buffer(), dst_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
+                        break;                   
                 }
+
                 oob_read(tmfd, &ticks, sizeof(ticks));
 
                 // Ajout : détection d'overrun

@@ -4,6 +4,7 @@
 #include <evl/clock.h>
 #include <evl/timer.h>
 
+#include "de1soc_utils/de1soc_io.h"
 #include "watchdog.h"
 
 // Watchdog task: checks if canary_counter is incremented using EVL timer
