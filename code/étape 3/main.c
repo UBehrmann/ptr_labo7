@@ -40,7 +40,7 @@ int main()
     running = true;
     atomic_init(&compteur, 0);
     atomic_init(&video_mode, 0);
-    atomic_init(&compensation_mode, 0);
+    atomic_init(&compensation_mode, MODE_REDUCTION_FRAMERATE);
 
 
     //////////////////////////////////////////////////////////////////////////

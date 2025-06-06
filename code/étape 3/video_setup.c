@@ -65,21 +65,24 @@ void *video_task(void *cookie) {
                 fread(src_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL, 1, file);
 
                 video_mode_t mode = atomic_load(priv->video_mode);
-                video_mode_t old_mode = mode;
                 uint32_t keys = read_key() & 0x7;
-                bool display = false;
 
                 // Change compensation mode depending on the key pressed
                 if (keys == 0x1) {
-                    atomic_store(priv->compensation_mode, MODE_NONE);
-                    evl_printf("[VIDEO_TASK] Compensation mode set to NONE.\n");
-
+                    if(atomic_load(priv->compensation_mode) != MODE_NONE) {
+                        atomic_store(priv->compensation_mode, MODE_NONE);
+                        evl_printf("[VIDEO_TASK] Compensation mode set to NONE.\n");
+                    }
                 } else if (keys == 0x2) {
-                    atomic_store(priv->compensation_mode, MODE_REDUCTION_FRAMERATE);
-                    evl_printf("[VIDEO_TASK] Compensation mode set to REDUCTION FRAMERATE.\n");
+                    if(atomic_load(priv->compensation_mode) != MODE_REDUCTION_FRAMERATE) {
+                        atomic_store(priv->compensation_mode, MODE_REDUCTION_FRAMERATE);
+                        evl_printf("[VIDEO_TASK] Compensation mode set to REDUCTION FRAMERATE.\n");
+                    }
                 } else if (keys == 0x4) {
-                    atomic_store(priv->compensation_mode, MODE_REDUCTION_COMPLEXITY);
-                    evl_printf("[VIDEO_TASK] Compensation mode set to REDUCTION COMPLEXITY.\n");
+                    if(atomic_load(priv->compensation_mode) != MODE_REDUCTION_COMPLEXITY) {
+                        atomic_store(priv->compensation_mode, MODE_REDUCTION_COMPLEXITY);
+                        evl_printf("[VIDEO_TASK] Compensation mode set to REDUCTION COMPLEXITY.\n");
+                    }
                 }
 
                 int compensation_mode = atomic_load(priv->compensation_mode);
@@ -109,32 +112,47 @@ void *video_task(void *cookie) {
                     case MODE_REDUCTION_FRAMERATE:
                         // --Méthode 2 : Diminuer le framerate avec variable
                         {
-                            static video_mode_t last_mode = -1;
                             int divider_changed = 0;
+                            // Clamp max divider to avoid overflow
+                            const int FRAMERATE_DIVIDER_MAX = 5000;
                             switch (mode) {
-                                case VIDEO_MODE_DEGRADED_1:
+                                case VIDEO_MODE_NORMAL:
                                     if (framerate_divider > 1) {
-                                        framerate_divider--;
+                                        framerate_divider -= 1;
+                                        if(framerate_divider < 1) {
+                                            framerate_divider = 1;
+                                        }
                                         divider_changed = 1;
                                     }
                                     break;
                                 case VIDEO_MODE_DEGRADED_2:
-                                    framerate_divider++;
+                                    framerate_divider += 2;
+                                    if (framerate_divider > FRAMERATE_DIVIDER_MAX)
+                                        framerate_divider = FRAMERATE_DIVIDER_MAX;
                                     divider_changed = 1;
                                     break;
-                                case VIDEO_MODE_NORMAL:
-                                    // Do not change divider or timer
+                                case VIDEO_MODE_DEGRADED_1:
+                                    framerate_divider += 1;
+                                    if (framerate_divider > FRAMERATE_DIVIDER_MAX)
+                                        framerate_divider = FRAMERATE_DIVIDER_MAX;
+                                    divider_changed = 1;
                                     break;
                             }
                             if (divider_changed) {
-                                last_mode = mode;
-                                long period_ns = VIDEO_PERIOD_NS * framerate_divider;
+                                unsigned long long period_ns = (unsigned long long)VIDEO_PERIOD_NS * (unsigned long long)framerate_divider;
+                                time_t sec = period_ns / 1000000000ULL;
+                                long nsec = period_ns % 1000000000ULL;
                                 evl_read_clock(EVL_CLOCK_MONOTONIC, &value.it_value);
-                                value.it_value.tv_nsec += period_ns;
-                                value.it_interval.tv_sec = 0;
-                                value.it_interval.tv_nsec = period_ns;
+                                value.it_value.tv_sec += sec;
+                                value.it_value.tv_nsec += nsec;
+                                if (value.it_value.tv_nsec >= 1000000000L) {
+                                    value.it_value.tv_sec += value.it_value.tv_nsec / 1000000000L;
+                                    value.it_value.tv_nsec = value.it_value.tv_nsec % 1000000000L;
+                                }
+                                value.it_interval.tv_sec = sec;
+                                value.it_interval.tv_nsec = nsec;
                                 evl_set_timer(tmfd, &value, NULL);
-                                evl_printf("[VIDEO_TASK] Framerate divider: %d, period_ns: %ld\n", framerate_divider, period_ns);
+                                evl_printf("[VIDEO_TASK] Timer period set to %llu ns (%lds %ldns), framerate divider: %d\n", period_ns, sec, nsec, framerate_divider);
                             }
                         }
 

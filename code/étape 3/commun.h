@@ -5,10 +5,10 @@
 #define ONE_MS_IN_NS                (ONE_S_IN_NS/ 1000UL)
 //------------------------------------------------
 #define CANARY_PRIO                 40
-#define CANARY_PERIOD_NS            10000000UL    // 10ms
+#define CANARY_PERIOD_NS            1000000UL    // 1ms
 //------------------------------------------------
 #define WATCHDOG_PRIO               90
-#define WATCHDOG_PERIOD_NS          (CANARY_PERIOD_NS * 10)  // = 100ms
+#define WATCHDOG_PERIOD_NS          (CANARY_PERIOD_NS * 100)  // = 100ms
 #define WATCHDOG_MISSED_THRESHOLD   10 // Number of missed canary increments before termination
 //------------------------------------------------
 #define VIDEO_PRIO                  50
