@@ -22,6 +22,7 @@
 bool running;
 atomic_int compteur;
 atomic_int video_mode;
+atomic_int compensation_mode;
 
 // Signal handler used to end the infinite loop
 void sigint_handler(int signum)
@@ -39,6 +40,7 @@ int main()
     running = true;
     atomic_init(&compteur, 0);
     atomic_init(&video_mode, 0);
+    atomic_init(&compensation_mode, 0);
 
 
     //////////////////////////////////////////////////////////////////////////
@@ -68,7 +70,8 @@ int main()
     //////////////////////////////////////////////////////////////////////////
     Priv_video_args_t priv_video = {
         .video_mode = &video_mode,
-        .running = &running
+        .running = &running,
+        .compensation_mode = &compensation_mode
     };
     // Create the video acquisition task
     if (pthread_create(&priv_video.rt_task, NULL, video_task, &priv_video) != 0)
@@ -106,7 +109,8 @@ int main()
     priv_watchdog_args_t priv_watchdog = {
         .video_mode = &video_mode,
         .compteur = &compteur,
-        .running = &running
+        .running = &running,
+        .compensation_mode = &compensation_mode
     };
     if (pthread_create(&priv_watchdog.rt_task, NULL, watchdog_task, &priv_watchdog) != 0)
     {

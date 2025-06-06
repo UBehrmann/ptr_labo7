@@ -17,7 +17,7 @@ void *watchdog_task(void *cookie) {
     struct itimerspec value;
     int tmfd = evl_new_timer(EVL_CLOCK_MONOTONIC);
     evl_read_clock(EVL_CLOCK_MONOTONIC, &value.it_value);
-    value.it_value.tv_sec += 1; // démarre dans 1 seconde
+    value.it_value.tv_sec += 1;  // démarre dans 1 seconde
     value.it_interval.tv_sec = 0;
     value.it_interval.tv_nsec = WATCHDOG_PERIOD_NS;
     evl_set_timer(tmfd, &value, NULL);
@@ -27,10 +27,11 @@ void *watchdog_task(void *cookie) {
     pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
 
     // Attacher à EVL
-    if (evl_attach_self("EVL watchdog thread") < 0)
-        return NULL;
+    if (evl_attach_self("EVL watchdog thread") < 0) return NULL;
 
     int last_counter = 0;
+    float avg_delta = 0.0f;
+    const float alpha = 0.2f; // smoothing factor for moving average
     // Boucle principale
     while (*(priv->running)) {
         oob_read(tmfd, &ticks, sizeof(ticks));
@@ -40,28 +41,57 @@ void *watchdog_task(void *cookie) {
 
         // Check si le compteur a changé
         int delta = (last_counter + 10) - current;
-        if (delta > 0 && delta >= VIDEO_MODE_NORMAL_TRESHOLD) {
-            if(delta >= VIDEO_MODE_NORMAL_TRESHOLD && 
-                delta < VIDEO_MODE_DEGRADED_1_TRESHOLD &&
-                atomic_load(priv->video_mode) != VIDEO_MODE_DEGRADED_1){
-                atomic_store(priv->video_mode, VIDEO_MODE_DEGRADED_1);
-                evl_printf("[WATCHDOG] video mode = DEGRADED 1.\n");
-            } 
-            if(delta >= VIDEO_MODE_DEGRADED_1_TRESHOLD 
-                && delta < VIDEO_MODE_DEGRADED_2_TRESHOLD
-                && atomic_load(priv->video_mode) != VIDEO_MODE_DEGRADED_2){
-                atomic_store(priv->video_mode, VIDEO_MODE_DEGRADED_2);
-                evl_printf("[WATCHDOG] video mode = DEGRADED 2.\n");
-            } 
-            if(delta >= VIDEO_MODE_DEGRADED_2_TRESHOLD){
-                evl_printf("[WATCHDOG] Canary missed too many times! Terminating application.\n");
-                *(priv->running) = false;
+        avg_delta = (1.0f - alpha) * avg_delta + alpha * delta;
+
+        int compensation_mode = atomic_load(priv->compensation_mode);
+
+        switch (compensation_mode) {
+            case MODE_REDUCTION_FRAMERATE:
+                // Nouvelle logique pour le framerate avec moyenne flottante
+                if (avg_delta < 0.5f) {
+                    if (atomic_load(priv->video_mode) != VIDEO_MODE_DEGRADED_1) {
+                        atomic_store(priv->video_mode, VIDEO_MODE_DEGRADED_1);
+                        evl_printf("[WATCHDOG] video mode = DEGRADED 1.\n");
+                    }
+                } else if (avg_delta >= 0.5f && avg_delta <= 2.0f) {
+                    if (atomic_load(priv->video_mode) != VIDEO_MODE_NORMAL) {
+                        atomic_store(priv->video_mode, VIDEO_MODE_NORMAL);
+                        evl_printf("[WATCHDOG] video mode = NORMAL.\n");
+                    }
+                } else if (avg_delta > 2.0f) {
+                    if (atomic_load(priv->video_mode) != VIDEO_MODE_DEGRADED_2) {
+                        atomic_store(priv->video_mode, VIDEO_MODE_DEGRADED_2);
+                        evl_printf("[WATCHDOG] video mode = DEGRADED 2.\n");
+                    }
+                }
                 break;
-            }
-        } else if (atomic_load(priv->video_mode) != VIDEO_MODE_NORMAL){
-            atomic_store(priv->video_mode, VIDEO_MODE_NORMAL);
-            evl_printf("[WATCHDOG] video mode = NORMAL.\n");
+
+            case MODE_REDUCTION_COMPLEXITY:
+
+                if (delta > 0 && delta >= VIDEO_MODE_NORMAL_TRESHOLD) {
+                    if (delta >= VIDEO_MODE_NORMAL_TRESHOLD && delta < VIDEO_MODE_DEGRADED_1_TRESHOLD &&
+                        atomic_load(priv->video_mode) != VIDEO_MODE_DEGRADED_1) {
+                        atomic_store(priv->video_mode, VIDEO_MODE_DEGRADED_1);
+                        evl_printf("[WATCHDOG] video mode = DEGRADED 1.\n");
+                    }
+                    if (delta >= VIDEO_MODE_DEGRADED_1_TRESHOLD && delta < VIDEO_MODE_DEGRADED_2_TRESHOLD &&
+                        atomic_load(priv->video_mode) != VIDEO_MODE_DEGRADED_2) {
+                        atomic_store(priv->video_mode, VIDEO_MODE_DEGRADED_2);
+                        evl_printf("[WATCHDOG] video mode = DEGRADED 2.\n");
+                    }
+                    if (delta >= VIDEO_MODE_DEGRADED_2_TRESHOLD) {
+                        evl_printf("[WATCHDOG] Canary missed too many times! Terminating application.\n");
+                        *(priv->running) = false;
+                        break;
+                    }
+                } else if (atomic_load(priv->video_mode) != VIDEO_MODE_NORMAL) {
+                    atomic_store(priv->video_mode, VIDEO_MODE_NORMAL);
+                    evl_printf("[WATCHDOG] video mode = NORMAL.\n");
+                }
+
+                break;
         }
+
         last_counter = current;
     }
     return NULL;

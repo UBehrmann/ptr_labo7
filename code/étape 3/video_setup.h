@@ -17,6 +17,7 @@ typedef struct Priv_video_args
     atomic_int* video_mode;
     bool *running;
     pthread_t rt_task;
+    atomic_int *compensation_mode;
 } Priv_video_args_t;
 
 void *video_task(void *cookie);

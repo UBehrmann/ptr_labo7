@@ -47,6 +47,8 @@ void *video_task(void *cookie) {
 
     FILE *file = fopen(VIDEO_FILENAME, "rb");
 
+    int framerate_divider = 1; // 1 = normal FPS, >1 = reduced FPS
+
     if (!file) {
         printf("Error: Couldn't open raw video file.\n");
     } else {
@@ -64,11 +66,26 @@ void *video_task(void *cookie) {
 
                 video_mode_t mode = atomic_load(priv->video_mode);
                 video_mode_t old_mode = mode;
-                uint32_t keys = read_key() & 0x3;
+                uint32_t keys = read_key() & 0x7;
                 bool display = false;
 
-                switch (keys) {
-                    case 3:
+                // Change compensation mode depending on the key pressed
+                if (keys == 0x1) {
+                    atomic_store(priv->compensation_mode, MODE_NONE);
+                    evl_printf("[VIDEO_TASK] Compensation mode set to NONE.\n");
+
+                } else if (keys == 0x2) {
+                    atomic_store(priv->compensation_mode, MODE_REDUCTION_FRAMERATE);
+                    evl_printf("[VIDEO_TASK] Compensation mode set to REDUCTION FRAMERATE.\n");
+                } else if (keys == 0x4) {
+                    atomic_store(priv->compensation_mode, MODE_REDUCTION_COMPLEXITY);
+                    evl_printf("[VIDEO_TASK] Compensation mode set to REDUCTION COMPLEXITY.\n");
+                }
+
+                int compensation_mode = atomic_load(priv->compensation_mode);
+
+                switch (compensation_mode) {
+                    case MODE_REDUCTION_COMPLEXITY:
                         //--Méthode 1 : Diminuer les opérations
                         switch (mode) {
                             case VIDEO_MODE_DEGRADED_2:
@@ -89,34 +106,35 @@ void *video_task(void *cookie) {
                                 break;
                         }
                         break;
-                    case 0:
-                        //--Méthode 2 : Diminuer le framerate
-                        if(old_mode != mode) {
-                            old_mode = mode;
-                        switch (mode) {
-                            case VIDEO_MODE_DEGRADED_2:
-                            evl_read_clock(EVL_CLOCK_MONOTONIC, &value.it_value);
-                                // value.it_value.tv_sec += 1;
-                                value.it_value.tv_nsec += VIDEO_PERIOD_NS / 15;
+                    case MODE_REDUCTION_FRAMERATE:
+                        // --Méthode 2 : Diminuer le framerate avec variable
+                        {
+                            static video_mode_t last_mode = -1;
+                            int divider_changed = 0;
+                            switch (mode) {
+                                case VIDEO_MODE_DEGRADED_1:
+                                    if (framerate_divider > 1) {
+                                        framerate_divider--;
+                                        divider_changed = 1;
+                                    }
+                                    break;
+                                case VIDEO_MODE_DEGRADED_2:
+                                    framerate_divider++;
+                                    divider_changed = 1;
+                                    break;
+                                case VIDEO_MODE_NORMAL:
+                                    // Do not change divider or timer
+                                    break;
+                            }
+                            if (divider_changed) {
+                                last_mode = mode;
+                                long period_ns = VIDEO_PERIOD_NS * framerate_divider;
+                                evl_read_clock(EVL_CLOCK_MONOTONIC, &value.it_value);
+                                value.it_value.tv_nsec += period_ns;
                                 value.it_interval.tv_sec = 0;
-                                value.it_interval.tv_nsec = VIDEO_PERIOD_NS / 15;
+                                value.it_interval.tv_nsec = period_ns;
                                 evl_set_timer(tmfd, &value, NULL);
-                                break;
-                            case VIDEO_MODE_DEGRADED_1:
-                            evl_read_clock(EVL_CLOCK_MONOTONIC, &value.it_value);
-                                // value.it_value.tv_sec += 1;
-                                value.it_value.tv_nsec += VIDEO_PERIOD_NS / 5;
-                                value.it_interval.tv_sec = 0;
-                                value.it_interval.tv_nsec = VIDEO_PERIOD_NS / 5;
-                                evl_set_timer(tmfd, &value, NULL);
-                                break;
-                            case VIDEO_MODE_NORMAL:
-                            evl_read_clock(EVL_CLOCK_MONOTONIC, &value.it_value);
-                                // value.it_value.tv_sec += 1;
-                                value.it_value.tv_nsec += VIDEO_PERIOD_NS;
-                                value.it_interval.tv_sec = 0;
-                                value.it_interval.tv_nsec = VIDEO_PERIOD_NS;
-                                evl_set_timer(tmfd, &value, NULL);
+                                evl_printf("[VIDEO_TASK] Framerate divider: %d, period_ns: %ld\n", framerate_divider, period_ns);
                             }
                         }
 
@@ -125,27 +143,27 @@ void *video_task(void *cookie) {
                         grayscale_to_rgba(gs_dst, &dst_image);
                         memcpy(get_video_buffer(), dst_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
                         break;
-                    case 1:
-                        //--Méthode 3 : Augmenter la priorité
-                        switch (mode) {
-                            case VIDEO_MODE_DEGRADED_2:
-                                param.sched_priority = VIDEO_PRIO + 30;
-                                pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
-                                break;
-                            case VIDEO_MODE_DEGRADED_1:
-                                param.sched_priority = VIDEO_PRIO + 15;
-                                pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
-                                break;
-                            case VIDEO_MODE_NORMAL:
-                                param.sched_priority = VIDEO_PRIO;
-                                pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
-                                break;
-                        }
-                        rgba_to_grayscale8(&src_image, gs_src);
-                        convolution_grayscale(gs_src, gs_dst, WIDTH, HEIGHT);
-                        grayscale_to_rgba(gs_dst, &dst_image);
-                        memcpy(get_video_buffer(), dst_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
-                        break;
+                    // case 1:
+                    //     //--Méthode 3 : Augmenter la priorité
+                    //     switch (mode) {
+                    //         case VIDEO_MODE_DEGRADED_2:
+                    //             param.sched_priority = VIDEO_PRIO + 30;
+                    //             pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
+                    //             break;
+                    //         case VIDEO_MODE_DEGRADED_1:
+                    //             param.sched_priority = VIDEO_PRIO + 15;
+                    //             pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
+                    //             break;
+                    //         case VIDEO_MODE_NORMAL:
+                    //             param.sched_priority = VIDEO_PRIO;
+                    //             pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
+                    //             break;
+                    //     }
+                    //     rgba_to_grayscale8(&src_image, gs_src);
+                    //     convolution_grayscale(gs_src, gs_dst, WIDTH, HEIGHT);
+                    //     grayscale_to_rgba(gs_dst, &dst_image);
+                    //     memcpy(get_video_buffer(), dst_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
+                    //     break;
                     default:
                         rgba_to_grayscale8(&src_image, gs_src);
                         convolution_grayscale(gs_src, gs_dst, WIDTH, HEIGHT);

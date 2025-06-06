@@ -12,6 +12,7 @@ typedef struct
     atomic_int* compteur;
     bool *running;
     pthread_t rt_task;
+    atomic_int *compensation_mode;
 } priv_watchdog_args_t;
 
 void *watchdog_task(void* cookie);
