@@ -106,13 +106,78 @@ A une charge à 36, on commence à observer des 'overruns' dans le système. Ils
 
 \section{Etape 2 : Détection de la surcharge avec watchdog}
 
+Vidéo :
+- Période : 66.67ms
+- Fréquence : 15Hz
+- Priorité : 50
 
+Load :
+- Période : 100ms
+- Fréquence : 10Hz
+- Priorité : 70
+
+Canari :
+- Période : 10ms
+- Fréquence : 100Hz
+- Priorité : 40
+
+Watchdog :
+- Période : 100ms
+- Fréquence : 10Hz
+- Priorité : 90
+
+Choix des priorité :
+- Load > Vidéo : La tâche Load simule une surcharge progressive en fonction des commutations (switches). Elle est volontairement prioritaire par rapport à Vidéo, afin que cette dernière soit affectée en cas de surcharge.
+- Load > Vidéo > Canari : En cas de surcharge, la tâche Canari (dont le rôle est de s'exécuter très fréquemment) n'arrive plus à incrémenter son compteur. Cette baisse d'activité permet de détecter la surcharge via le Watchdog qui surveille ce compteur. D'où l'importance que Canari ait une priorité plus faible.
+- Watchdog > Load > Vidéo > Canari : La tâche Watchdog doit toujours pouvoir s'exécuter, même en cas de surcharge, pour surveiller le bon fonctionnement du Canari. Elle possède donc la priorité la plus élevée. Cela garantit que le système puisse détecter une surcharge critique et éventuellement déclencher un arrêt de sécurité.
+
+Choix de fréquence :
+- Canari >> Watchdog : Canari s’exécute 10 fois plus souvent que Watchdog. Cela permet au Watchdog de vérifier que le compteur du Canari a bien été incrémenté d’au moins 10 entre deux vérifications. Si ce n’est pas le cas, cela indique une surcharge.
+- Load = Watchdog : Même fréquence mais rôles opposés : Load génère la surcharge, Watchdog la détecte. Leur fréquence identique garantit une surveillance cohérente.
+- Canari >> Vidéo : Avec une période très courte (10 ms), Canari détecte rapidement toute baisse de performance. Son exécution fréquente est essentielle pour assurer la réactivité du mécanisme de détection.
 
 \newpage
 
 \section{Etape 3 : Fonctionnalité dégradée}
 
+# Méthodes
+Méthode 1 :
+- Principe : Diminuer la charge de calcul en simplifiant les traitements appliqués à chaque image.
+- Mode vidéo = NORMAL : conversion en niveaux de gris 8-bit + convolution + reconversion en RGBA.
+- Mode vidéo = DEGRADED_1 : uniquement conversion en niveaux de gris (pas de convolution).
+- Mode vidéo = DEGRADED_2 : affichage brut sans traitement.
+- Avantage : dégrade la qualité visuelle sans affecter le taux de rafraîchissement.
+- Inconvénient : baisse progressive de la qualité perçue.
 
+Méthode 2 :
+- Principe : Augmenter la période de la tâche vidéo pour lui permettre de respirer sous surcharge.
+- Mode vidéo = NORMAL : 15 Hz (66,67 ms)
+- Mode vidéo = DEGRADED_1 : 3 Hz (≈333 ms)
+- Mode vidéo = DEGRADED_2 : 1 Hz (≈1000 ms)
+- Avantage : Libère du temps processeur pour les autres tâches.
+- Inconvénient : Affichage plus saccadé.
+
+Méthode 3 (bonus) :
+- Principe : Élever temporairement la priorité de la tâche vidéo pour qu’elle reste réactive.
+- Mode vidéo = NORMAL : priorité initiale
+- Mode vidéo = DEGRADED_1 : +15
+- Mode vidéo = DEGRADED_2 : +30
+- Avantage : Maintient la réactivité en cas de surcharge modérée.
+- Inconvénient : Risque de bloquer d’autres tâches si utilisé excessivement.
+
+---
+
+# Stratégie / Fonctionnement
+Le système utilise la différence de fréquence entre Canari (100 Hz) et Watchdog (10 Hz) pour détecter une surcharge. Le Watchdog s’attend à un incrément de 10 du compteur toutes les 100 ms. Si ce nombre est inférieur, cela reflète un retard d’exécution de Canari, donc une surcharge.
+Trois seuils sont définis pour adapter dynamiquement le comportement de la tâche Vidéo :
+- Si le décalage est ≥ 3 : passage en VIDEO_MODE_DEGRADED_1
+    - #define VIDEO_MODE_NORMAL_TRESHOLD      3
+- Si le décalage est ≥ 6 : passage en VIDEO_MODE_DEGRADED_2
+    - #define VIDEO_MODE_DEGRADED_1_TRESHOLD  6
+- Si le décalage est ≥ 9 : arrêt du système
+    - #define VIDEO_MODE_DEGRADED_2_TRESHOLD  9
+Le Watchdog écrit le mode vidéo (VIDEO_MODE_NORMAL, DEGRADED_1, DEGRADED_2) dans une variable atomique. La tâche Vidéo lit ce mode et adapte son exécution en conséquence, selon la méthode choisie (réduction de traitement, baisse de fréquence ou hausse de priorité).
+En cas de surcharge trop importante (delta >= 9), le système est arrêté pour préserver sa stabilité.
 
 \newpage
 
