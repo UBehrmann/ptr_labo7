@@ -19,8 +19,8 @@
 #define LOAD_PERIOD_NS              (ONE_MS_IN_NS * 100)
 //------------------------------------------------
 typedef enum { VIDEO_MODE_NORMAL, VIDEO_MODE_DEGRADED_1, VIDEO_MODE_DEGRADED_2 } video_mode_t;
-#define VIDEO_MODE_NORMAL_TRESHOLD 3
-#define VIDEO_MODE_DEGRADED_1_TRESHOLD 6
+#define VIDEO_MODE_NORMAL_TRESHOLD 1
+#define VIDEO_MODE_DEGRADED_1_TRESHOLD 3
 #define VIDEO_MODE_DEGRADED_2_TRESHOLD 9
 
 
