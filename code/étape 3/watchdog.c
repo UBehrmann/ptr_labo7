@@ -32,7 +32,7 @@ void *watchdog_task(void *cookie) {
 
     int last_counter = 0;
     double avg_delta = 0.0;
-    const double alpha = 0.2; // smoothing factor for moving average
+    const double alpha = 0.05; // smoothing factor for moving average
 
     // Boucle principale
     while (*(priv->running)) {
