@@ -105,31 +105,12 @@ void *video_task(void *cookie) {
                         //--Méthode 1 : Diminuer les opérations
                         switch (mode) {
                             case VIDEO_MODE_DEGRADED_2:
-                                // Use precomputed 16x downscaled buffer, convolve, then upscale by 16
-                                convolution_grayscale(
-                                    video_buffer_16x + i * (WIDTH/16) * (HEIGHT/16),
-                                    video_buffer_16x + i * (WIDTH/16) * (HEIGHT/16),
-                                    WIDTH/16, HEIGHT/16
-                                );
-                                upscale_grayscale(
-                                    video_buffer_16x + i * (WIDTH/16) * (HEIGHT/16),
-                                    gs_tmp, WIDTH, HEIGHT, 16
-                                );
-                                grayscale_to_rgba(gs_tmp, &dst_image);
-                                memcpy(get_video_buffer(), dst_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
+                                // fall through
+                                memcpy(get_video_buffer(), src_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
                                 break;
                             case VIDEO_MODE_DEGRADED_1:
-                                // Use precomputed 8x downscaled buffer, convolve, then upscale by 8
-                                convolution_grayscale(
-                                    video_buffer_8x + i * (WIDTH/8) * (HEIGHT/8),
-                                    video_buffer_8x + i * (WIDTH/8) * (HEIGHT/8),
-                                    WIDTH/8, HEIGHT/8
-                                );
-                                upscale_grayscale(
-                                    video_buffer_8x + i * (WIDTH/8) * (HEIGHT/8),
-                                    gs_tmp, WIDTH, HEIGHT, 8
-                                );
-                                grayscale_to_rgba(gs_tmp, &dst_image);
+                                // Skip convolution
+                                rgba_to_grayscale32(&src_image, &dst_image);
                                 memcpy(get_video_buffer(), dst_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
                                 break;
                             case VIDEO_MODE_NORMAL:
