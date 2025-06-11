@@ -44,6 +44,61 @@ static void upscale_rgba(const uint8_t *src, uint8_t *dst, int width, int height
     }
 }
 
+void downscale_image(const uint8_t *src, uint8_t *dst, int width, int height, int factor, int components) {
+    int new_width = width / factor;
+    int new_height = height / factor;
+
+    for (int by = 0; by < new_height; by++) {
+        for (int bx = 0; bx < new_width; bx++) {
+            int sum[4] = {0}; // Max 4 composants
+            int count = 0;
+
+            for (int fy = 0; fy < factor; fy++) {
+                for (int fx = 0; fx < factor; fx++) {
+                    int x = bx * factor + fx;
+                    int y = by * factor + fy;
+                    if (x < width && y < height) {
+                        int idx = (y * width + x) * components;
+                        for (int c = 0; c < components; c++) {
+                            sum[c] += src[idx + c];
+                        }
+                        count++;
+                    }
+                }
+            }
+
+            int dst_idx = (by * new_width + bx) * components;
+            for (int c = 0; c < components; c++) {
+                dst[dst_idx + c] = sum[c] / count;
+            }
+        }
+    }
+}
+
+void upscale_image(const uint8_t *src, uint8_t *dst, int src_width, int src_height, int factor, int components) {
+    int dst_width = src_width * factor;
+
+    for (int sy = 0; sy < src_height; sy++) {
+        for (int sx = 0; sx < src_width; sx++) {
+            int src_index = (sy * src_width + sx) * components;
+
+            for (int fy = 0; fy < factor; fy++) {
+                for (int fx = 0; fx < factor; fx++) {
+                    int dx = sx * factor + fx;
+                    int dy = sy * factor + fy;
+                    int dst_index = (dy * dst_width + dx) * components;
+
+                    for (int c = 0; c < components; c++) {
+                        dst[dst_index + c] = src[src_index + c];
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+
 static void upscale_grayscale(const uint8_t *src, uint8_t *dst, int width, int height, int factor) {
     int src_w = width / factor;
     int src_h = height / factor;
@@ -130,7 +185,7 @@ void *video_task(void *cookie) {
 
                 } else if (keys == 0x2 && compensation_mode != MODE_REDUCTION_SCALE) {
                     compensation_mode = MODE_REDUCTION_SCALE;
-                    evl_printf("[VIDEO_TASK] Compensation mode set to REDUCTION FRAMERATE.\n");
+                    evl_printf("[VIDEO_TASK] Compensation mode set to REDUCTION SCALE.\n");
                 } else if (keys == 0x4 && compensation_mode != MODE_REDUCTION_COMPLEXITY) {
                     compensation_mode = MODE_REDUCTION_COMPLEXITY;
                     evl_printf("[VIDEO_TASK] Compensation mode set to REDUCTION COMPLEXITY.\n");
@@ -162,30 +217,93 @@ void *video_task(void *cookie) {
                         //--Méthode 2 : Diminuer le framerate (now: keep image size reduction)
                         switch (mode) {
                             case VIDEO_MODE_DEGRADED_2: {
-                                struct img_1D_t this_frame;
-                                this_frame.data = video_buffer_4x + i * (WIDTH/4) * (HEIGHT/4) * BYTES_PER_PIXEL;
-                                this_frame.width = WIDTH / 4;
-                                this_frame.height = HEIGHT / 4;
-                                this_frame.components = BYTES_PER_PIXEL;
+                                struct img_1D_t src_image_small;
+                                src_image_small.data = malloc(WIDTH/4 * HEIGHT/4 * BYTES_PER_PIXEL);
+                                src_image_small.width = WIDTH / 4;
+                                src_image_small.height = HEIGHT / 4;
+                                src_image_small.components = BYTES_PER_PIXEL;
 
-                                rgba_to_grayscale8(&this_frame, gs_tmp);
-                                convolution_grayscale(gs_tmp, gs_tmp, WIDTH/4, HEIGHT/4);
-                                upscale_grayscale(gs_tmp, gs_dst, WIDTH, HEIGHT, 4);
-                                grayscale_to_rgba(gs_dst, &dst_image);
+
+                                downscale_image(
+                                    src_image.data, src_image_small.data,
+                                    WIDTH, HEIGHT, 4, BYTES_PER_PIXEL
+                                );
+
+                                struct img_1D_t src_image_greyscale;
+                                src_image_greyscale.data = malloc(WIDTH/4 * HEIGHT/4 * 1);
+                                src_image_greyscale.width = WIDTH / 4;
+                                src_image_greyscale.height = HEIGHT / 4;
+                                src_image_greyscale.components = 1;
+
+                                rgba_to_grayscale8(&src_image_small, src_image_greyscale.data);
+
+                                struct img_1D_t src_image_convolved;
+                                src_image_convolved.data = malloc(WIDTH/4 * HEIGHT/4 * 1);
+                                src_image_convolved.width = WIDTH / 4;
+                                src_image_convolved.height = HEIGHT / 4;
+                                src_image_convolved.components = 1;
+
+                                convolution_grayscale(src_image_greyscale.data, src_image_convolved.data, WIDTH/4, HEIGHT/4);
+
+                                struct img_1D_t src_image_rgba;
+                                src_image_rgba.data = malloc(WIDTH/4 * HEIGHT/4 * 4);
+                                src_image_rgba.width = WIDTH / 4;
+                                src_image_rgba.height = HEIGHT / 4;
+                                src_image_rgba.components = 4;
+
+                                grayscale_to_rgba(src_image_convolved.data, &src_image_rgba);
+
+                                upscale_image(
+                                    src_image_rgba.data, dst_image.data,
+                                    WIDTH/4, HEIGHT/4, 4, BYTES_PER_PIXEL
+                                );
                                 memcpy(get_video_buffer(), dst_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
                                 break;
                             }
                             case VIDEO_MODE_DEGRADED_1: {
-                                struct img_1D_t this_frame;
-                                this_frame.data = video_buffer_2x + i * (WIDTH/2) * (HEIGHT/2) * BYTES_PER_PIXEL;
-                                this_frame.width = WIDTH / 2;
-                                this_frame.height = HEIGHT / 2;
-                                this_frame.components = BYTES_PER_PIXEL;
 
-                                rgba_to_grayscale8(&this_frame, gs_tmp);
-                                convolution_grayscale(gs_tmp, gs_tmp, WIDTH/2, HEIGHT/2);
-                                upscale_grayscale(gs_tmp, gs_dst, WIDTH, HEIGHT, 2);
-                                grayscale_to_rgba(gs_dst, &dst_image);
+
+                                struct img_1D_t src_image_small;
+                                src_image_small.data = malloc(WIDTH/2 * HEIGHT/2 * BYTES_PER_PIXEL);
+                                src_image_small.width = WIDTH / 2;
+                                src_image_small.height = HEIGHT / 2;
+                                src_image_small.components = BYTES_PER_PIXEL;
+
+
+                                downscale_image(
+                                    src_image.data, src_image_small.data,
+                                    WIDTH, HEIGHT, 2, BYTES_PER_PIXEL
+                                );
+
+                                struct img_1D_t src_image_greyscale;
+                                src_image_greyscale.data = malloc(WIDTH/2 * HEIGHT/2 * 1);
+                                src_image_greyscale.width = WIDTH / 2;
+                                src_image_greyscale.height = HEIGHT / 2;
+                                src_image_greyscale.components = 1;
+
+                                rgba_to_grayscale8(&src_image_small, src_image_greyscale.data);
+
+                                struct img_1D_t src_image_convolved;
+                                src_image_convolved.data = malloc(WIDTH/2 * HEIGHT/2 * 1);
+                                src_image_convolved.width = WIDTH / 2;
+                                src_image_convolved.height = HEIGHT / 2;
+                                src_image_convolved.components = 1;
+
+                                convolution_grayscale(src_image_greyscale.data, src_image_convolved.data, WIDTH/2, HEIGHT/2);
+
+                                struct img_1D_t src_image_rgba;
+                                src_image_rgba.data = malloc(WIDTH/2 * HEIGHT/2 * 4);
+                                src_image_rgba.width = WIDTH / 2;
+                                src_image_rgba.height = HEIGHT / 2;
+                                src_image_rgba.components = 4;
+
+                                grayscale_to_rgba(src_image_convolved.data, &src_image_rgba);
+
+                                upscale_image(
+                                    src_image_rgba.data, dst_image.data,
+                                    WIDTH/2, HEIGHT/2, 2, BYTES_PER_PIXEL
+                                );
+
                                 memcpy(get_video_buffer(), dst_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
                                 break;
                             }

@@ -32,7 +32,7 @@ void *watchdog_task(void *cookie) {
 
     int last_counter = 0;
     double avg_delta = 0.0;
-    const double alpha = 0.05; // smoothing factor for moving average
+    const double alpha = 0.1; // smoothing factor for moving average
 
     // Boucle principale
     while (*(priv->running)) {
@@ -46,18 +46,25 @@ void *watchdog_task(void *cookie) {
         avg_delta = (1.0 - alpha) * avg_delta + alpha * delta;
 
         if(avg_delta > VIDEO_MODE_DEGRADED_2_TRESHOLD){
+            
                 evl_printf("[WATCHDOG] Canary missed too many times! Terminating application.\n");
                 *(priv->running) = false;
                 break;
+
         } else if(avg_delta > VIDEO_MODE_DEGRADED_1_TRESHOLD
             && atomic_load(priv->video_mode) != VIDEO_MODE_DEGRADED_2){
+
             atomic_store(priv->video_mode, VIDEO_MODE_DEGRADED_2);
             evl_printf("[WATCHDOG] video mode = DEGRADED 2.\n");
+
         } else if(avg_delta >= VIDEO_MODE_NORMAL_TRESHOLD &&
                 atomic_load(priv->video_mode) != VIDEO_MODE_DEGRADED_1){
+
                 atomic_store(priv->video_mode, VIDEO_MODE_DEGRADED_1);
                 evl_printf("[WATCHDOG] video mode = DEGRADED 1.\n");
+
         } else if(atomic_load(priv->video_mode) != VIDEO_MODE_NORMAL){
+
             atomic_store(priv->video_mode, VIDEO_MODE_NORMAL);
             evl_printf("[WATCHDOG] video mode = NORMAL.\n");
         }
