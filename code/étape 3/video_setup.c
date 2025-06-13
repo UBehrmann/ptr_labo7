@@ -11,38 +11,8 @@
 #include "de1soc_utils/image.h"
 #include "de1soc_utils/grayscale.h"
 #include "de1soc_utils/convolution.h"
+#include "de1soc_utils/de1soc_io.h"
 #include "commun.h"
-
-// Helper: downscale RGBA image by factor (nearest neighbor)
-static void downscale_rgba(const uint8_t *src, uint8_t *dst, int width, int height, int factor) {
-    int dst_w = width / factor;
-    int dst_h = height / factor;
-    for (int dy = 0; dy < dst_h; ++dy) {
-        for (int dx = 0; dx < dst_w; ++dx) {
-            // Pick the top-left pixel in the factor x factor block
-            int sx = dx * factor;
-            int sy = dy * factor;
-            int src_idx = (sy * width + sx) * BYTES_PER_PIXEL;
-            int dst_idx = (dy * dst_w + dx) * BYTES_PER_PIXEL;
-            memcpy(&dst[dst_idx], &src[src_idx], BYTES_PER_PIXEL);
-        }
-    }
-}
-
-// Helper: upscale RGBA image by factor (nearest neighbor)
-static void upscale_rgba(const uint8_t *src, uint8_t *dst, int width, int height, int factor) {
-    int src_w = width / factor;
-    int src_h = height / factor;
-    for (int dy = 0; dy < height; ++dy) {
-        int sy = dy / factor;
-        for (int dx = 0; dx < width; ++dx) {
-            int sx = dx / factor;
-            int src_idx = (sy * src_w + sx) * BYTES_PER_PIXEL;
-            int dst_idx = (dy * width + dx) * BYTES_PER_PIXEL;
-            memcpy(&dst[dst_idx], &src[src_idx], BYTES_PER_PIXEL);
-        }
-    }
-}
 
 void downscale_image(const uint8_t *src, uint8_t *dst, int width, int height, int factor, int components) {
     int new_width = width / factor;
@@ -97,20 +67,6 @@ void upscale_image(const uint8_t *src, uint8_t *dst, int src_width, int src_heig
     }
 }
 
-
-
-static void upscale_grayscale(const uint8_t *src, uint8_t *dst, int width, int height, int factor) {
-    int src_w = width / factor;
-    int src_h = height / factor;
-    for (int dy = 0; dy < height; ++dy) {
-        int sy = dy / factor;
-        for (int dx = 0; dx < width; ++dx) {
-            int sx = dx / factor;
-            dst[dy * width + dx] = src[sy * src_w + sx];
-        }
-    }
-}
-
 void *video_task(void *cookie) {
     Priv_video_args_t *priv = (Priv_video_args_t *)cookie;
     struct img_1D_t src_image;
@@ -123,10 +79,17 @@ void *video_task(void *cookie) {
     uint8_t *gs_dst = (uint8_t *)malloc(WIDTH * HEIGHT * sizeof(uint8_t));
     uint8_t *gs_tmp = (uint8_t *)malloc(WIDTH * HEIGHT * sizeof(uint8_t)); // temp for upscaling
 
-    // Precompute downscaled video buffers
-    uint8_t *video_buffer_2x = (uint8_t *)malloc(NB_FRAMES * (WIDTH/2) * (HEIGHT/2) * BYTES_PER_PIXEL);
-
-    uint8_t *video_buffer_4x = (uint8_t *)malloc(NB_FRAMES * (WIDTH/4) * (HEIGHT/4) * BYTES_PER_PIXEL);
+    // Allocation des buffers pour les différents modes
+    int small_w_2 = WIDTH / 2, small_h_2 = HEIGHT / 2, small_px_2 = small_w_2 * small_h_2;
+    int small_w_4 = WIDTH / 4, small_h_4 = HEIGHT / 4, small_px_4 = small_w_4 * small_h_4;
+    uint8_t *buf_small_2 = malloc(small_px_2 * BYTES_PER_PIXEL);
+    uint8_t *buf_gray_2 = malloc(small_px_2);
+    uint8_t *buf_conv_2 = malloc(small_px_2);
+    uint8_t *buf_rgba_2 = malloc(small_px_2 * 4);
+    uint8_t *buf_small_4 = malloc(small_px_4 * BYTES_PER_PIXEL);
+    uint8_t *buf_gray_4 = malloc(small_px_4);
+    uint8_t *buf_conv_4 = malloc(small_px_4);
+    uint8_t *buf_rgba_4 = malloc(small_px_4 * 4);
 
     dst_image.width = src_image.width = WIDTH;
     dst_image.height = src_image.height = HEIGHT;
@@ -134,18 +97,16 @@ void *video_task(void *cookie) {
     src_image.data = (uint8_t *)malloc(WIDTH * HEIGHT * BYTES_PER_PIXEL);
     dst_image.data = (uint8_t *)malloc(WIDTH * HEIGHT * BYTES_PER_PIXEL);
 
-    /* Create timer */
+    // Création du timer EVL pour la synchro vidéo
     struct itimerspec value;
     int tmfd = evl_new_timer(EVL_CLOCK_MONOTONIC);
     evl_read_clock(EVL_CLOCK_MONOTONIC, &value.it_value);
-    // Make timer start 1 sec from now (for some headroom)
     value.it_value.tv_sec += 1;
     value.it_interval.tv_sec = 0;
     value.it_interval.tv_nsec = VIDEO_PERIOD_NS;
-
     evl_set_timer(tmfd, &value, NULL);
 
-    // Make thread RT
+    // Passage du thread en temps réel
     param.sched_priority = VIDEO_PRIO;
     pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
     if (evl_attach_self("EVL video thread") < 0) return NULL;
@@ -154,35 +115,25 @@ void *video_task(void *cookie) {
 
     if (!file) {
         printf("Error: Couldn't open raw video file.\n");
-    } else {
-        // Precompute downscaled buffers
-        fseek(file, 0, SEEK_SET);
-        for (int i = 0; i < NB_FRAMES; i++) {
-            fread(src_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL, 1, file);
-            // Downscale by 2 (RGBA)
-            downscale_rgba(src_image.data, video_buffer_2x + i * (WIDTH/2) * (HEIGHT/2) * BYTES_PER_PIXEL, WIDTH, HEIGHT, 2);
-            // Downscale by 4 (RGBA)
-            downscale_rgba(src_image.data, video_buffer_4x + i * (WIDTH/4) * (HEIGHT/4) * BYTES_PER_PIXEL, WIDTH, HEIGHT, 4);
-        }
 
-        // Main loop
+    } else {
+        // Boucle principale vidéo
         while (*priv->running) {
             fseek(file, 0, SEEK_SET);
-            
-
             for (int i = 0; i < NB_FRAMES; i++) {
+
                 if (!*priv->running) break;
 
                 fread(src_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL, 1, file);
 
                 video_mode_t mode = atomic_load(priv->video_mode);
+
                 uint32_t keys = read_key() & 0x7;
 
-                // Change compensation mode depending on the key pressed
+                // Gestion du mode de compensation selon la touche
                 if (keys == 0x1 && compensation_mode != MODE_NONE) {
                     compensation_mode = MODE_NONE;
                     evl_printf("[VIDEO_TASK] Compensation mode set to NONE.\n");
-
                 } else if (keys == 0x2 && compensation_mode != MODE_REDUCTION_SCALE) {
                     compensation_mode = MODE_REDUCTION_SCALE;
                     evl_printf("[VIDEO_TASK] Compensation mode set to REDUCTION SCALE.\n");
@@ -190,22 +141,18 @@ void *video_task(void *cookie) {
                     compensation_mode = MODE_REDUCTION_COMPLEXITY;
                     evl_printf("[VIDEO_TASK] Compensation mode set to REDUCTION COMPLEXITY.\n");
                 }
-
+                // Traitement vidéo selon le mode de compensation et le mode vidéo
                 switch (compensation_mode) {
                     case MODE_REDUCTION_COMPLEXITY:
-                        //--Méthode 1 : Diminuer les opérations
                         switch (mode) {
                             case VIDEO_MODE_DEGRADED_2:
-                                // fall through
                                 memcpy(get_video_buffer(), src_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
                                 break;
                             case VIDEO_MODE_DEGRADED_1:
-                                // Skip convolution
                                 rgba_to_grayscale32(&src_image, &dst_image);
                                 memcpy(get_video_buffer(), dst_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
                                 break;
                             case VIDEO_MODE_NORMAL:
-                                // Full processing
                                 rgba_to_grayscale8(&src_image, gs_src);
                                 convolution_grayscale(gs_src, gs_dst, WIDTH, HEIGHT);
                                 grayscale_to_rgba(gs_dst, &dst_image);
@@ -214,96 +161,26 @@ void *video_task(void *cookie) {
                         }
                         break;
                     case MODE_REDUCTION_SCALE:
-                        //--Méthode 2 : Diminuer le framerate (now: keep image size reduction)
                         switch (mode) {
                             case VIDEO_MODE_DEGRADED_2: {
-                                struct img_1D_t src_image_small;
-                                src_image_small.data = malloc(WIDTH/4 * HEIGHT/4 * BYTES_PER_PIXEL);
-                                src_image_small.width = WIDTH / 4;
-                                src_image_small.height = HEIGHT / 4;
-                                src_image_small.components = BYTES_PER_PIXEL;
-
-
-                                downscale_image(
-                                    src_image.data, src_image_small.data,
-                                    WIDTH, HEIGHT, 4, BYTES_PER_PIXEL
-                                );
-
-                                struct img_1D_t src_image_greyscale;
-                                src_image_greyscale.data = malloc(WIDTH/4 * HEIGHT/4 * 1);
-                                src_image_greyscale.width = WIDTH / 4;
-                                src_image_greyscale.height = HEIGHT / 4;
-                                src_image_greyscale.components = 1;
-
-                                rgba_to_grayscale8(&src_image_small, src_image_greyscale.data);
-
-                                struct img_1D_t src_image_convolved;
-                                src_image_convolved.data = malloc(WIDTH/4 * HEIGHT/4 * 1);
-                                src_image_convolved.width = WIDTH / 4;
-                                src_image_convolved.height = HEIGHT / 4;
-                                src_image_convolved.components = 1;
-
-                                convolution_grayscale(src_image_greyscale.data, src_image_convolved.data, WIDTH/4, HEIGHT/4);
-
-                                struct img_1D_t src_image_rgba;
-                                src_image_rgba.data = malloc(WIDTH/4 * HEIGHT/4 * 4);
-                                src_image_rgba.width = WIDTH / 4;
-                                src_image_rgba.height = HEIGHT / 4;
-                                src_image_rgba.components = 4;
-
-                                grayscale_to_rgba(src_image_convolved.data, &src_image_rgba);
-
-                                upscale_image(
-                                    src_image_rgba.data, dst_image.data,
-                                    WIDTH/4, HEIGHT/4, 4, BYTES_PER_PIXEL
-                                );
+                                downscale_image(src_image.data, buf_small_4, WIDTH, HEIGHT, 4, BYTES_PER_PIXEL);
+                                struct img_1D_t tmp_img = { .data = buf_small_4, .width = small_w_4, .height = small_h_4, .components = BYTES_PER_PIXEL };
+                                rgba_to_grayscale8(&tmp_img, buf_gray_4);
+                                convolution_grayscale(buf_gray_4, buf_conv_4, small_w_4, small_h_4);
+                                struct img_1D_t tmp_rgba = { .data = buf_rgba_4, .width = small_w_4, .height = small_h_4, .components = 4 };
+                                grayscale_to_rgba(buf_conv_4, &tmp_rgba);
+                                upscale_image(buf_rgba_4, dst_image.data, small_w_4, small_h_4, 4, BYTES_PER_PIXEL);
                                 memcpy(get_video_buffer(), dst_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
                                 break;
                             }
                             case VIDEO_MODE_DEGRADED_1: {
-
-
-                                struct img_1D_t src_image_small;
-                                src_image_small.data = malloc(WIDTH/2 * HEIGHT/2 * BYTES_PER_PIXEL);
-                                src_image_small.width = WIDTH / 2;
-                                src_image_small.height = HEIGHT / 2;
-                                src_image_small.components = BYTES_PER_PIXEL;
-
-
-                                downscale_image(
-                                    src_image.data, src_image_small.data,
-                                    WIDTH, HEIGHT, 2, BYTES_PER_PIXEL
-                                );
-
-                                struct img_1D_t src_image_greyscale;
-                                src_image_greyscale.data = malloc(WIDTH/2 * HEIGHT/2 * 1);
-                                src_image_greyscale.width = WIDTH / 2;
-                                src_image_greyscale.height = HEIGHT / 2;
-                                src_image_greyscale.components = 1;
-
-                                rgba_to_grayscale8(&src_image_small, src_image_greyscale.data);
-
-                                struct img_1D_t src_image_convolved;
-                                src_image_convolved.data = malloc(WIDTH/2 * HEIGHT/2 * 1);
-                                src_image_convolved.width = WIDTH / 2;
-                                src_image_convolved.height = HEIGHT / 2;
-                                src_image_convolved.components = 1;
-
-                                convolution_grayscale(src_image_greyscale.data, src_image_convolved.data, WIDTH/2, HEIGHT/2);
-
-                                struct img_1D_t src_image_rgba;
-                                src_image_rgba.data = malloc(WIDTH/2 * HEIGHT/2 * 4);
-                                src_image_rgba.width = WIDTH / 2;
-                                src_image_rgba.height = HEIGHT / 2;
-                                src_image_rgba.components = 4;
-
-                                grayscale_to_rgba(src_image_convolved.data, &src_image_rgba);
-
-                                upscale_image(
-                                    src_image_rgba.data, dst_image.data,
-                                    WIDTH/2, HEIGHT/2, 2, BYTES_PER_PIXEL
-                                );
-
+                                downscale_image(src_image.data, buf_small_2, WIDTH, HEIGHT, 2, BYTES_PER_PIXEL);
+                                struct img_1D_t tmp_img = { .data = buf_small_2, .width = small_w_2, .height = small_h_2, .components = BYTES_PER_PIXEL };
+                                rgba_to_grayscale8(&tmp_img, buf_gray_2);
+                                convolution_grayscale(buf_gray_2, buf_conv_2, small_w_2, small_h_2);
+                                struct img_1D_t tmp_rgba = { .data = buf_rgba_2, .width = small_w_2, .height = small_h_2, .components = 4 };
+                                grayscale_to_rgba(buf_conv_2, &tmp_rgba);
+                                upscale_image(buf_rgba_2, dst_image.data, small_w_2, small_h_2, 2, BYTES_PER_PIXEL);
                                 memcpy(get_video_buffer(), dst_image.data, WIDTH * HEIGHT * BYTES_PER_PIXEL);
                                 break;
                             }
@@ -326,7 +203,7 @@ void *video_task(void *cookie) {
 
                 oob_read(tmfd, &ticks, sizeof(ticks));
 
-                // Ajout : détection d'overrun
+                // Détection d'overrun du timer
                 if (ticks > 1) {
                     evl_printf("[VIDEO_TASK] Timer overrun detected! Overruns: %llu\n", ticks - 1);
                 }
@@ -336,14 +213,11 @@ void *video_task(void *cookie) {
         fclose(file);
     }
 
-    free(src_image.data);
-    free(dst_image.data);
-
-    free(gs_src);
-    free(gs_dst);
-    free(gs_tmp);
-    free(video_buffer_2x);
-    free(video_buffer_4x);
+    // Libération des buffers alloués
+    free(buf_small_2); free(buf_gray_2); free(buf_conv_2); free(buf_rgba_2);
+    free(buf_small_4); free(buf_gray_4); free(buf_conv_4); free(buf_rgba_4);
+    free(src_image.data); free(dst_image.data);
+    free(gs_src); free(gs_dst); free(gs_tmp);
 
     evl_printf("Terminating video task.\n");
 

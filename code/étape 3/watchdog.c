@@ -7,6 +7,9 @@
 #include "de1soc_utils/de1soc_io.h"
 #include "watchdog.h"
 
+#define RECOVERY_CYCLES 5
+#define RECOVERY_CYCLES_DEG2_TO_DEG1 15
+
 // Watchdog task: checks if canary_counter is incremented using EVL timer
 void *watchdog_task(void *cookie) {
     priv_watchdog_args_t *priv = (priv_watchdog_args_t *)cookie;
@@ -32,44 +35,71 @@ void *watchdog_task(void *cookie) {
 
     int last_counter = 0;
     double avg_delta = 0.0;
-    const double alpha = 0.1; // smoothing factor for moving average
+    const double alpha = 0.1; // facteur de lissage pour la moyenne mobile
+    int recovery_counter = 0; // compteur pour la récupération de l'état
+    int state = atomic_load(priv->video_mode); // état courant du mode vidéo
 
-    // Boucle principale
+    // Boucle principale du watchdog
     while (*(priv->running)) {
         oob_read(tmfd, &ticks, sizeof(ticks));
-
-        // Lecture atomique du compteur
         int current = atomic_load(priv->compteur);
-
-        // Calcul du delta et moyenne flottante
         int delta = (last_counter + 10) - current;
         avg_delta = (1.0 - alpha) * avg_delta + alpha * delta;
 
-        if(avg_delta > VIDEO_MODE_DEGRADED_2_TRESHOLD){
-            
-                evl_printf("[WATCHDOG] Canary missed too many times! Terminating application.\n");
-                *(priv->running) = false;
-                break;
-
-        } else if(avg_delta > VIDEO_MODE_DEGRADED_1_TRESHOLD
-            && atomic_load(priv->video_mode) != VIDEO_MODE_DEGRADED_2){
-
-            atomic_store(priv->video_mode, VIDEO_MODE_DEGRADED_2);
-            evl_printf("[WATCHDOG] video mode = DEGRADED 2.\n");
-
-        } else if(avg_delta >= VIDEO_MODE_NORMAL_TRESHOLD &&
-                atomic_load(priv->video_mode) != VIDEO_MODE_DEGRADED_1){
-
-                atomic_store(priv->video_mode, VIDEO_MODE_DEGRADED_1);
-                evl_printf("[WATCHDOG] video mode = DEGRADED 1.\n");
-
-        } else if(atomic_load(priv->video_mode) != VIDEO_MODE_NORMAL){
-
-            atomic_store(priv->video_mode, VIDEO_MODE_NORMAL);
-            evl_printf("[WATCHDOG] video mode = NORMAL.\n");
+        // Arrêt d'urgence si le système est trop en retard
+        if (avg_delta > VIDEO_MODE_DEGRADED_2_TRESHOLD) {
+            evl_printf("[WATCHDOG] Canary missed too many times! Terminating application.\n");
+            *(priv->running) = false;
+            break;
         }
 
-        last_counter = current;
+        // Gestion des transitions d'états du mode vidéo
+        switch (state) {
+            case VIDEO_MODE_NORMAL:
+                // Passage immédiat à DEGRADED 1 si surcharge détectée
+                if (avg_delta > VIDEO_MODE_NORMAL_TRESHOLD) {
+                    state = VIDEO_MODE_DEGRADED_1;
+                    atomic_store(priv->video_mode, state);
+                    evl_printf("[WATCHDOG] video mode = DEGRADED 1.\n");
+                    recovery_counter = 0;
+                }
+                break;
+            case VIDEO_MODE_DEGRADED_1:
+                // Passage immédiat à DEGRADED 2 si surcharge plus forte
+                if (avg_delta > VIDEO_MODE_DEGRADED_1_TRESHOLD) {
+                    state = VIDEO_MODE_DEGRADED_2;
+                    atomic_store(priv->video_mode, state);
+                    evl_printf("[WATCHDOG] video mode = DEGRADED 2.\n");
+                    recovery_counter = 0;
+                // Retour à NORMAL après plusieurs cycles sous le seuil
+                } else if (avg_delta <= VIDEO_MODE_NORMAL_TRESHOLD) {
+                    recovery_counter++;
+                    if (recovery_counter >= RECOVERY_CYCLES) {
+                        state = VIDEO_MODE_NORMAL;
+                        atomic_store(priv->video_mode, state);
+                        evl_printf("[WATCHDOG] video mode = NORMAL.\n");
+                        recovery_counter = 0;
+                    }
+                } else {
+                    recovery_counter = 0;
+                }
+                break;
+            case VIDEO_MODE_DEGRADED_2:
+                // Retour à DEGRADED 1 après plusieurs cycles sous le seuil
+                if (avg_delta <= VIDEO_MODE_DEGRADED_1_TRESHOLD) {
+                    recovery_counter++;
+                    if (recovery_counter >= RECOVERY_CYCLES_DEG2_TO_DEG1) {
+                        state = VIDEO_MODE_DEGRADED_1;
+                        atomic_store(priv->video_mode, state);
+                        evl_printf("[WATCHDOG] video mode = DEGRADED 1.\n");
+                        recovery_counter = 0;
+                    }
+                } else {
+                    recovery_counter = 0;
+                }
+                break;
+        }
+        last_counter = current; // Mise à jour du compteur précédent
     }
     return NULL;
 }
