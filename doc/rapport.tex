@@ -94,96 +94,158 @@
 
 \section{Introduction}
 
+Dans le cadre de l'unité d'enseignement PTR, ce laboratoire a pour objectif d'étudier la gestion de la surcharge dans un système temps réel embarqué. À travers différentes étapes pratiques, il s'agit d'observer le comportement du système sous forte charge, de mettre en place des mécanismes de détection de surcharge à l'aide d'un watchdog, puis d'implémenter des stratégies de dégradation fonctionnelle pour préserver la stabilité et la réactivité du système.
 
+L'approche proposée consiste à simuler une surcharge progressive, à détecter automatiquement les situations critiques et à adapter dynamiquement le fonctionnement des tâches, notamment celle de traitement vidéo. Ce rapport détaille les observations réalisées, les choix d'implémentation et les résultats obtenus lors de chaque étape du laboratoire.
 
 \newpage
 
 \section{Etape 1 : Observation de la surcharge}
 
-A une charge à 36, on commence à observer des 'overruns' dans le système. Ils ne sont pas encore très fréquents, mais ils sont présents.
+\subsection{Détection des overruns}
+
+Pour détecter les overruns (dépassements de période) dans la tâche vidéo, nous utilisons le compteur de ticks retourné par le timer EVL à chaque réveil de la tâche. Si la valeur de \texttt{ticks} est supérieure à 1, cela signifie que la tâche n'a pas pu traiter toutes les images dans le temps imparti et qu'une ou plusieurs périodes ont été manquées. Un message d'avertissement est alors affiché pour chaque overrun détecté.
+
+\subsection{Modification du chargement vidéo}
+
+Initialement, le fichier vidéo était ouvert à chaque début de boucle principale, ce qui introduisait une surcharge inutile et des accès disques fréquents. Nous avons modifié le code pour ouvrir le fichier une seule fois au début de la tâche vidéo, puis réinitialiser le pointeur de fichier à la position zéro (\texttt{fseek(file, 0, SEEK\_SET)}) à chaque nouvelle boucle sur les images. Cette optimisation réduit la charge système et améliore la stabilité temporelle de la tâche vidéo.
+
+\subsection{Observation}
+
+Lors de nos essais, nous avons constaté que les premiers overruns apparaissent dès que la charge atteint 36. À ce stade, le système reste globalement stable, mais des dépassements de période sont régulièrement signalés dans la console. Cela indique que la tâche vidéo n'a plus toujours le temps de traiter chaque image dans la fenêtre temporelle prévue, ce qui se traduit par une perte de fluidité et un risque de dégradation progressive des performances si la charge continue d'augmenter.
 
 \newpage
 
 \section{Etape 2 : Détection de la surcharge avec watchdog}
 
-Vidéo :
-- Période : 66.67ms
-- Fréquence : 15Hz
-- Priorité : 50
+\subsection{Paramètres des tâches}
 
-Load :
-- Période : 100ms
-- Fréquence : 10Hz
-- Priorité : 70
+\begin{longtable}{|>{\raggedright}p{3cm}|>{\raggedright}p{2.5cm}|>{\raggedright}p{2.5cm}|>{\raggedright\arraybackslash}p{2.5cm}|}
+\hline
+\textbf{Tâche} & \textbf{Période} & \textbf{Fréquence} & \textbf{Priorité} \\
+\hline
+Vidéo    & 66.67 ms  & 15 Hz   & 50 \\
+Load     & 100 ms    & 10 Hz   & 70 \\
+Canari   & 10 ms     & 100 Hz  & 40 \\
+Watchdog & 100 ms    & 10 Hz   & 90 \\
+\hline
+\end{longtable}
 
-Canari :
-- Période : 10ms
-- Fréquence : 100Hz
-- Priorité : 40
+\subsection{Choix des priorités}
 
-Watchdog :
-- Période : 100ms
-- Fréquence : 10Hz
-- Priorité : 90
+\begin{itemize}
+    \item \textbf{Load $>$ Vidéo} : La tâche Load simule une surcharge progressive en fonction des commutations (\textit{switches}). Elle est volontairement prioritaire par rapport à Vidéo, afin que cette dernière soit affectée en cas de surcharge.
+    \item \textbf{Load $>$ Vidéo $>$ Canari} : En cas de surcharge, la tâche Canari (dont le rôle est de s'exécuter très fréquemment) n'arrive plus à incrémenter son compteur. Cette baisse d'activité permet de détecter la surcharge via le Watchdog qui surveille ce compteur. D'où l'importance que Canari ait une priorité plus faible.
+    \item \textbf{Watchdog $>$ Load $>$ Vidéo $>$ Canari} : La tâche Watchdog doit toujours pouvoir s'exécuter, même en cas de surcharge, pour surveiller le bon fonctionnement du Canari. Elle possède donc la priorité la plus élevée. Cela garantit que le système puisse détecter une surcharge critique et éventuellement déclencher un arrêt de sécurité.
+\end{itemize}
 
-Choix des priorité :
-- Load > Vidéo : La tâche Load simule une surcharge progressive en fonction des commutations (switches). Elle est volontairement prioritaire par rapport à Vidéo, afin que cette dernière soit affectée en cas de surcharge.
-- Load > Vidéo > Canari : En cas de surcharge, la tâche Canari (dont le rôle est de s'exécuter très fréquemment) n'arrive plus à incrémenter son compteur. Cette baisse d'activité permet de détecter la surcharge via le Watchdog qui surveille ce compteur. D'où l'importance que Canari ait une priorité plus faible.
-- Watchdog > Load > Vidéo > Canari : La tâche Watchdog doit toujours pouvoir s'exécuter, même en cas de surcharge, pour surveiller le bon fonctionnement du Canari. Elle possède donc la priorité la plus élevée. Cela garantit que le système puisse détecter une surcharge critique et éventuellement déclencher un arrêt de sécurité.
+\subsection{Choix des fréquences}
 
-Choix de fréquence :
-- Canari >> Watchdog : Canari s’exécute 10 fois plus souvent que Watchdog. Cela permet au Watchdog de vérifier que le compteur du Canari a bien été incrémenté d’au moins 10 entre deux vérifications. Si ce n’est pas le cas, cela indique une surcharge.
-- Load = Watchdog : Même fréquence mais rôles opposés : Load génère la surcharge, Watchdog la détecte. Leur fréquence identique garantit une surveillance cohérente.
-- Canari >> Vidéo : Avec une période très courte (10 ms), Canari détecte rapidement toute baisse de performance. Son exécution fréquente est essentielle pour assurer la réactivité du mécanisme de détection.
+\begin{itemize}
+    \item \textbf{Canari $\gg$ Watchdog} : Canari s’exécute 10 fois plus souvent que Watchdog. Cela permet au Watchdog de vérifier que le compteur du Canari a bien été incrémenté d’au moins 10 entre deux vérifications. Si ce n’est pas le cas, cela indique une surcharge.
+    \item \textbf{Load = Watchdog} : Même fréquence mais rôles opposés : Load génère la surcharge, Watchdog la détecte. Leur fréquence identique garantit une surveillance cohérente.
+    \item \textbf{Canari $\gg$ Vidéo} : Avec une période très courte (10 ms), Canari détecte rapidement toute baisse de performance. Son exécution fréquente est essentielle pour assurer la réactivité du mécanisme de détection.
+\end{itemize}
 
 \newpage
 
 \section{Etape 3 : Fonctionnalité dégradée}
 
-# Méthodes
-Méthode 1 :
-- Principe : Diminuer la charge de calcul en simplifiant les traitements appliqués à chaque image.
-- Mode vidéo = NORMAL : conversion en niveaux de gris 8-bit + convolution + reconversion en RGBA.
-- Mode vidéo = DEGRADED_1 : uniquement conversion en niveaux de gris (pas de convolution).
-- Mode vidéo = DEGRADED_2 : affichage brut sans traitement.
-- Avantage : dégrade la qualité visuelle sans affecter le taux de rafraîchissement.
-- Inconvénient : baisse progressive de la qualité perçue.
+\subsection*{Modes de compensation implémentés}
 
-Méthode 2 :
-- Principe : Augmenter la période de la tâche vidéo pour lui permettre de respirer sous surcharge.
-- Mode vidéo = NORMAL : 15 Hz (66,67 ms)
-- Mode vidéo = DEGRADED_1 : 3 Hz (≈333 ms)
-- Mode vidéo = DEGRADED_2 : 1 Hz (≈1000 ms)
-- Avantage : Libère du temps processeur pour les autres tâches.
-- Inconvénient : Affichage plus saccadé.
+Trois modes de compensation peuvent être sélectionnés dynamiquement via les touches du DE1-SoC :
+\begin{itemize}
+    \item \textbf{Aucune compensation (MODE\_NONE)} : Traitement complet, sans réduction de charge.
+    \item \textbf{Réduction d'échelle (MODE\_REDUCTION\_SCALE)} : Traitement sur une image réduite (par facteur 2 ou 4), puis réagrandie.
+    \item \textbf{Réduction de complexité (MODE\_REDUCTION\_COMPLEXITY)} : Simplification du traitement appliqué à chaque image.
+\end{itemize}
 
-Méthode 3 (bonus) :
-- Principe : Élever temporairement la priorité de la tâche vidéo pour qu’elle reste réactive.
-- Mode vidéo = NORMAL : priorité initiale
-- Mode vidéo = DEGRADED_1 : +15
-- Mode vidéo = DEGRADED_2 : +30
-- Avantage : Maintient la réactivité en cas de surcharge modérée.
-- Inconvénient : Risque de bloquer d’autres tâches si utilisé excessivement.
+\subsection{Traitement vidéo selon le mode de compensation et le niveau de dégradation}
 
----
+\begin{longtable}{|p{3.2cm}|p{2.8cm}|p{7.5cm}|}
+\hline
+\textbf{Mode de compensation} & \textbf{Niveau vidéo} & \textbf{Traitement appliqué} \\
+\hline
+Aucune (NONE) & Tous & Gris 8 bits, convolution, RGBA \\
+\hline
+Réduction d'échelle (SCALE) & NORMAL & Idem NONE \\
+ & DEGRADED\_1 & Réduction $\times$2, gris, convolution, agrandissement $\times$2 \\
+ & DEGRADED\_2 & Réduction $\times$4, gris, convolution, agrandissement $\times$4 \\
+\hline
+Réduction complexité (COMPLEXITY) & NORMAL & Gris 8 bits, convolution, RGBA \\
+ & DEGRADED\_1 & Gris 32 bits (sans convolution) \\
+ & DEGRADED\_2 & Affichage brut (aucun traitement) \\
+\hline
+\end{longtable}
 
-# Stratégie / Fonctionnement
-Le système utilise la différence de fréquence entre Canari (100 Hz) et Watchdog (10 Hz) pour détecter une surcharge. Le Watchdog s’attend à un incrément de 10 du compteur toutes les 100 ms. Si ce nombre est inférieur, cela reflète un retard d’exécution de Canari, donc une surcharge.
-Trois seuils sont définis pour adapter dynamiquement le comportement de la tâche Vidéo :
-- Si le décalage est ≥ 3 : passage en VIDEO_MODE_DEGRADED_1
-    - #define VIDEO_MODE_NORMAL_TRESHOLD      3
-- Si le décalage est ≥ 6 : passage en VIDEO_MODE_DEGRADED_2
-    - #define VIDEO_MODE_DEGRADED_1_TRESHOLD  6
-- Si le décalage est ≥ 9 : arrêt du système
-    - #define VIDEO_MODE_DEGRADED_2_TRESHOLD  9
-Le Watchdog écrit le mode vidéo (VIDEO_MODE_NORMAL, DEGRADED_1, DEGRADED_2) dans une variable atomique. La tâche Vidéo lit ce mode et adapte son exécution en conséquence, selon la méthode choisie (réduction de traitement, baisse de fréquence ou hausse de priorité).
-En cas de surcharge trop importante (delta >= 9), le système est arrêté pour préserver sa stabilité.
+\break
+
+\subsection{Sélection du mode de compensation}
+
+Le mode de compensation peut être changé à la volée via les touches du DE1-SoC :
+\begin{itemize}
+    \item Touche 0 : Aucune compensation
+    \item Touche 1 : Réduction d'échelle
+    \item Touche 2 : Réduction de complexité
+\end{itemize}
+
+\subsection{Stratégie de gestion de la surcharge}
+
+Le système utilise la différence de fréquence entre la tâche Canari (100 Hz) et le Watchdog (10 Hz) pour détecter la surcharge. À chaque période du Watchdog (100 ms), il vérifie que le compteur du Canari a bien été incrémenté d'au moins 10. Le retard est mesuré et intégré dans une moyenne mobile pour lisser les variations.
+
+Trois seuils sont définis pour adapter dynamiquement le comportement de la tâche vidéo :
+
+\begin{itemize}
+    \item Si la moyenne mobile du retard est $>$ \texttt{VIDEO\_MODE\_NORMAL\_TRESHOLD} (1) : passage immédiat en \texttt{VIDEO\_MODE\_DEGRADED\_1}
+    \item Si la moyenne mobile du retard est $>$ \texttt{VIDEO\_MODE\_DEGRADED\_1\_TRESHOLD} (2) : passage immédiat en \texttt{VIDEO\_MODE\_DEGRADED\_2}
+    \item Si la moyenne mobile du retard est $>$ \texttt{VIDEO\_MODE\_DEGRADED\_2\_TRESHOLD} (9) : arrêt du système
+\end{itemize}
+
+Les retours à un mode moins dégradé ne sont possibles qu'après plusieurs cycles consécutifs sous le seuil correspondant :
+
+\begin{itemize}
+    \item Retour à \texttt{VIDEO\_MODE\_NORMAL} après 5 cycles sous le seuil 1
+    \item Retour à \texttt{VIDEO\_MODE\_DEGRADED\_1} après 15 cycles sous le seuil 2
+\end{itemize}
+
+Le Watchdog écrit le mode vidéo courant dans une variable atomique. La tâche vidéo lit ce mode et adapte son exécution selon le mode de compensation sélectionné. Cette logique évite les oscillations rapides entre les modes et assure une adaptation progressive à la charge réelle du système.
+
+\break
+
+\subsection{Résumé du fonctionnement}
+
+\begin{itemize}
+    \item La surcharge est détectée automatiquement par le Watchdog via une moyenne mobile du retard du Canari.
+    \item Le mode vidéo (NORMAL, DEGRADED\_1, DEGRADED\_2) est ajusté dynamiquement selon les seuils définis.
+    \item Les transitions vers un mode moins dégradé nécessitent plusieurs cycles consécutifs sous le seuil.
+    \item L'utilisateur peut choisir à tout moment la stratégie de compensation (aucune, réduction d'échelle, réduction de complexité).
+    \item Le traitement vidéo s'adapte en temps réel pour préserver la stabilité du système.
+\end{itemize}
+
+\subsection{Seuils d'apparition des overruns selon le mode}
+
+\begin{center}
+\begin{tabular}{|l|c|}
+\hline
+\textbf{Mode de compensation} & \textbf{Charge à l'apparition des overruns} \\
+\hline
+Aucun (NONE) & 33 \\
+Réduction d'échelle (SCALE) & 65 \\
+Réduction de complexité (COMPLEXITY) & 76 \\
+\hline
+\end{tabular}
+\end{center}
 
 \newpage
 
 \section{Conclusion}
 
+Ce laboratoire nous a permis d'aborder concrètement la problématique de la surcharge dans un système temps réel embarqué. Nous avons d'abord observé l'apparition des overruns et identifié les limites du système en conditions nominales. L'intégration d'un watchdog et d'une tâche canari a permis de détecter automatiquement les situations de surcharge, puis d'adapter dynamiquement le traitement vidéo grâce à différents modes de compensation.
 
+Les résultats montrent que la réduction de la charge de traitement, que ce soit par simplification des algorithmes ou par réduction de la résolution, permet d'augmenter significativement la robustesse du système face à la surcharge. On observe ainsi que le seuil d'apparition des overruns peut être doublé grâce à ces méthodes, passant d'environ 33 à plus de 65, voire 76 selon le mode choisi.
 
+De plus, la gestion dynamique des modes, associée à une logique de récupération progressive avec compteur dans le watchdog, a permis d'éliminer complètement les oscillations entre deux modes d'affichage. Cette approche garantit une stabilité accrue tout en maintenant la meilleure qualité de service possible selon les ressources disponibles.
+
+Ce travail met en évidence l'importance de la surveillance et de l'adaptation dans la conception de systèmes embarqués fiables et réactifs.
 
 \end{document}
