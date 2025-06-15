@@ -98,6 +98,61 @@ Dans le cadre de l'unité d'enseignement PTR, ce laboratoire a pour objectif d'�
 
 L'approche proposée consiste à simuler une surcharge progressive, à détecter automatiquement les situations critiques et à adapter dynamiquement le fonctionnement des tâches, notamment celle de traitement vidéo. Ce rapport détaille les observations réalisées, les choix d'implémentation et les résultats obtenus lors de chaque étape du laboratoire.
 
+\section{Architecure du projet}
+
+\begin{description}
+  \item[\texttt{code/}] Contient l’ensemble des étapes de développement du code.
+  \begin{description}
+    \item[\texttt{étape 1/}] Première phase du développement.
+    \item[\texttt{étape 2/}] Deuxième phase du développement.
+    \item[\texttt{étape 3/}] Troisième phase du développement.
+  \end{description}
+  \item[\texttt{doc/}] Dossier réservé à la documentation (peut contenir rapports, schémas, etc.).
+\end{description}
+
+\section{Compilation}
+
+Pour compiler le projet, il faut se placer à la racine de l’étape souhaitée (par exemple l’étape 1) :
+
+\begin{verbatim}
+/code/étape 1/
+\end{verbatim}
+
+Ensuite, générer le fichier \texttt{Makefile} à partir du \texttt{CMakeLists.txt} en utilisant la commande suivante :
+
+\begin{verbatim}
+cmake -DCMAKE_TOOLCHAIN_FILE=/home/reds/Desktop/ptr/de1soc-sdk/share/buildroot/toolchainfile.cmake .
+\end{verbatim}
+
+Enfin, compiler le projet avec :
+
+\begin{verbatim}
+make
+\end{verbatim}
+
+\section{Fichiers ajoutés}
+
+Dans cette section, nous présentons les fichiers ajoutés au projet, en expliquant leur rôle fonctionnel sans entrer dans le détail du code.
+
+\begin{description}
+
+  \item[\texttt{commun.h}]  
+  Ce fichier d'en-tête centralise la configuration générale du système à travers des définitions de constantes partagées, telles que les périodes d’exécution des tâches temps réel (exprimées en nanosecondes), les priorités, et les seuils de dégradation du mode vidéo. Il définit également des types énumérés pour gérer les différents états de fonctionnement du système vidéo (mode normal, dégradé 1 et dégradé 2), ainsi que les types de réduction appliqués.
+
+  \item[\texttt{canary.h} \& \texttt{canary.c}]  
+  Ces fichiers définissent et implémentent une tâche appelée « canary ». Elle agit comme une sonde système, s’exécutant à intervalle régulier pour incrémenter un compteur partagé. Cette tâche sert de référence temporelle que le système peut surveiller. Elle utilise un timer EVL et fonctionne avec des priorités temps réel. Son bon fonctionnement est essentiel pour que le système de surveillance (watchdog) puisse détecter d’éventuelles surcharges ou blocages.
+
+  \item[\texttt{watchdog.h} \& \texttt{watchdog.c}]  
+  Ces fichiers définissent et implémentent la tâche watchdog, qui a pour rôle de surveiller la régularité des incréments du compteur du canary. Elle détecte les retards ou absences d'incréments, signe de surcharge ou de dysfonctionnement. En fonction de la gravité de la situation, elle ajuste dynamiquement le mode vidéo du système en passant par des états de dégradation (normal → dégradé 1 → dégradé 2) ou en revenant à un état plus stable si les conditions s'améliorent. En cas d’erreur grave persistante, elle peut arrêter le système pour éviter des conséquences critiques.
+
+\end{description}
+
+Afin de prendre en compte les fichiers ajoutés lors de la compilation, il est impératif de modifier la ligne de construction dans le \texttt{CMakeLists.txt} comme suit :
+
+\begin{verbatim}
+add_executable(main main.c video_setup.c load_setup.c canary.c watchdog.c)
+\end{verbatim}
+
 \newpage
 
 \section{Etape 1 : Observation de la surcharge}
